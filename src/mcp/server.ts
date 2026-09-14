@@ -1,0 +1,369 @@
+/**
+ * MCP server over the BrainClient. Tools call the REST API; resources and prompts
+ * serve the conventions folder from disk so an agent always sees the current rules.
+ */
+import fs from "node:fs/promises";
+import path from "node:path";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { z } from "zod";
+import type { LinkReport, NoteSummary, SearchResult } from "../core/types.ts";
+import type { BrainClient } from "./client.ts";
+
+export interface McpServerOptions {
+  /** Folder holding conventions.md, file.md, garden.md. */
+  conventionsDir: string;
+}
+
+const noteType = z.enum(["note", "hub", "source"]);
+const searchMode = z.enum(["hybrid", "keyword", "semantic"]);
+
+const searchResultSchema = z.object({
+  kind: z.enum(["note", "file"]),
+  id: z.string(),
+  path: z.string(),
+  title: z.string(),
+  summary: z.string(),
+  snippet: z.string(),
+  score: z.number(),
+  tags: z.array(z.string()),
+  type: noteType.optional(),
+});
+
+export function createMcpServer(client: BrainClient, opts: McpServerOptions): McpServer {
+  const server = new McpServer({ name: "brain", version: "0.1.0" });
+  const readConvention = (name: string) => fs.readFile(path.join(opts.conventionsDir, `${name}.md`), "utf8");
+
+  // ---- tools ----------------------------------------------------------------
+
+  server.registerTool(
+    "search",
+    {
+      title: "Search the brain",
+      description:
+        "Find notes and files by meaning or keyword. Use this first whenever you need a fact or want to know whether a note already exists. Returns slug, title, summary, and a snippet per hit; open the few that matter with get_note.",
+      inputSchema: {
+        query: z.string().describe("What to look for. Specific terms work best."),
+        limit: z.number().int().positive().optional().describe("Max results. Default set by the server."),
+        tag: z.string().optional().describe("Only notes carrying this tag."),
+        type: noteType.optional().describe("Only notes of this type."),
+        mode: searchMode.optional().describe("hybrid (default), keyword (FTS only), or semantic (embeddings only)."),
+      },
+      outputSchema: { results: z.array(searchResultSchema) },
+      annotations: { readOnlyHint: true },
+    },
+    guard(async ({ query, limit, tag, type, mode }) => {
+      const results = await client.search(query, { limit, tag, type, mode });
+      return {
+        content: [{ type: "text", text: results.length === 0 ? "No results." : results.map(formatSearchResult).join("\n") }],
+        structuredContent: { results },
+      };
+    }),
+  );
+
+  server.registerTool(
+    "get_note",
+    {
+      title: "Read a note",
+      description:
+        "Return the full markdown file for a slug (frontmatter and body) plus its mtimeMs. Pass that mtimeMs as expectedMtimeMs to write_note when updating so a concurrent change is not overwritten.",
+      inputSchema: { slug: z.string().describe("The note or source slug.") },
+      annotations: { readOnlyHint: true },
+    },
+    guard(async ({ slug }) => {
+      const note = await client.get(slug);
+      return text(`slug: ${note.slug}\npath: ${note.path}\nmtimeMs: ${note.mtimeMs}\n\n${note.raw}`);
+    }),
+  );
+
+  server.registerTool(
+    "list_notes",
+    {
+      title: "List notes",
+      description:
+        "List every note with slug, title, and summary, optionally filtered by tag or type. Use it to see a whole domain or all hubs; use search when you are looking for a specific fact.",
+      inputSchema: {
+        tag: z.string().optional().describe("Only notes carrying this tag."),
+        type: noteType.optional().describe("Only notes of this type."),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    guard(async ({ tag, type }) => {
+      const notes = await client.list({ tag, type });
+      return text(notes.length === 0 ? "No notes." : notes.map(formatSummary).join("\n"));
+    }),
+  );
+
+  server.registerTool(
+    "backlinks",
+    {
+      title: "Backlinks to a note",
+      description: "List the notes that link to a slug. Use it to find surrounding context, and to check for orphans when gardening.",
+      inputSchema: { slug: z.string().describe("The target slug.") },
+      annotations: { readOnlyHint: true },
+    },
+    guard(async ({ slug }) => {
+      const notes = await client.backlinks(slug);
+      return text(notes.length === 0 ? `No backlinks to ${slug}.` : notes.map(formatSummary).join("\n"));
+    }),
+  );
+
+  server.registerTool(
+    "write_note",
+    {
+      title: "Create or replace a note",
+      description:
+        "Write a whole note: frontmatter fields plus the markdown body. Omit slug to create one derived from the title; give a slug to create or replace that file. Tags must already exist (see list_tags). Every write is a git commit. Search before creating to avoid duplicates.",
+      inputSchema: {
+        slug: z
+          .string()
+          .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/)
+          .optional()
+          .describe("Target slug. Omit to derive from title."),
+        title: z.string().describe("A claim or a noun phrase."),
+        type: noteType.describe("note, hub, or source."),
+        summary: z.string().describe("One sentence containing the fact, for an agent deciding whether to open the note."),
+        tags: z.array(z.string()).describe("Tags from list_tags. Usually one, sometimes two."),
+        body: z.string().describe("Markdown body without the frontmatter block. Lead with the fact; end with a ## Related section of wikilinks."),
+        sources: z.array(z.string()).optional().describe("Slugs of source notes this was derived from."),
+        files: z.array(z.string()).optional().describe("Brain-relative attachment paths, e.g. files/invoice.pdf."),
+        expectedMtimeMs: z.number().optional().describe("mtimeMs from get_note. The write fails if the file changed since."),
+      },
+      annotations: { destructiveHint: true },
+    },
+    guard(async ({ slug, title, type, summary, tags, body, sources, files, expectedMtimeMs }) => {
+      const note = await client.write({
+        slug,
+        frontmatter: { title, type, summary, tags, ...(sources ? { sources } : {}), ...(files ? { files } : {}) },
+        body,
+        expectedMtimeMs,
+      });
+      return text(`slug: ${note.slug}\npath: ${note.path}\nupdated: ${note.updated}\nmtimeMs: ${note.mtimeMs}`);
+    }),
+  );
+
+  server.registerTool(
+    "rename_note",
+    {
+      title: "Rename a note",
+      description: "Move a note to a new slug and rewrite every [[wikilink]] and sources entry that pointed at the old one. One commit.",
+      inputSchema: {
+        oldSlug: z.string().describe("Current slug."),
+        newSlug: z
+          .string()
+          .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/)
+          .describe("New slug: lowercase a-z0-9, hyphen-separated."),
+      },
+      annotations: { destructiveHint: true },
+    },
+    guard(async ({ oldSlug, newSlug }) => {
+      const result = await client.rename(oldSlug, newSlug);
+      const rewritten = result.rewritten.length === 0 ? "No other notes referenced it." : `Rewritten links in: ${result.rewritten.join(", ")}`;
+      return text(`Renamed ${oldSlug} to ${result.note.slug} (${result.note.path}).\n${rewritten}`);
+    }),
+  );
+
+  server.registerTool(
+    "delete_note",
+    {
+      title: "Delete a note",
+      description: "Delete a note or source by slug. Check backlinks first and repoint them, or check_links will report broken links. Reversible through git.",
+      inputSchema: { slug: z.string().describe("The slug to delete.") },
+      annotations: { destructiveHint: true },
+    },
+    guard(async ({ slug }) => {
+      await client.delete(slug);
+      return text(`Deleted ${slug}.`);
+    }),
+  );
+
+  server.registerTool(
+    "list_tags",
+    {
+      title: "List tags",
+      description: "The tag registry: name and description of every tag a note may use. Call it before tagging or creating a tag.",
+      annotations: { readOnlyHint: true },
+    },
+    guard(async () => {
+      const tags = await client.tags();
+      return text(tags.length === 0 ? "No tags." : tags.map((t) => `${t.name} — ${t.description}`).join("\n"));
+    }),
+  );
+
+  server.registerTool(
+    "create_tag",
+    {
+      title: "Create a tag",
+      description: "Add a tag to the registry. Tags are few and broad (a whole domain, not a topic). Create one only when list_tags has nothing that fits.",
+      inputSchema: {
+        name: z.string().describe("Lowercase, short, hyphenated if needed."),
+        description: z.string().describe("One line saying what belongs under this tag."),
+      },
+    },
+    guard(async ({ name, description }) => {
+      const tag = await client.createTag({ name, description });
+      return text(`Created tag ${tag.name} — ${tag.description}`);
+    }),
+  );
+
+  server.registerTool(
+    "inbox_list",
+    {
+      title: "List the inbox",
+      description: "Items the owner dropped in inbox/ that have not been filed. Text items can become source notes with inbox_take; other files move to files/.",
+      annotations: { readOnlyHint: true },
+    },
+    guard(async () => {
+      const items = await client.inboxList();
+      return text(
+        items.length === 0
+          ? "Inbox is empty."
+          : items.map((i) => `${i.name} — ${i.sizeBytes} bytes — ${i.isText ? "text" : "binary"}`).join("\n"),
+      );
+    }),
+  );
+
+  server.registerTool(
+    "inbox_take",
+    {
+      title: "Take an inbox item",
+      description:
+        "Move an inbox item out of the inbox. A text item becomes a source note in sources/ with its contents verbatim; give it a real title and a one-line summary. A binary item moves to files/. Returns the source slug and full contents so you can read it at once.",
+      inputSchema: {
+        name: z.string().describe("The item name from inbox_list."),
+        title: z.string().optional().describe("Title for the source note. Default: the filename."),
+        slug: z
+          .string()
+          .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/)
+          .optional()
+          .describe("Slug for the source note. Default: derived from the title."),
+        summary: z.string().optional().describe("One line: what the material is and where it came from."),
+      },
+      annotations: { destructiveHint: true },
+    },
+    guard(async ({ name, title, slug, summary }) => {
+      const result = await client.inboxTake(name, { title, slug, summary });
+      if (result.kind === "file" || !result.note) {
+        return text(`Moved ${name} to ${result.filePath ?? "files/"}. Attach it to a note with files: [${result.filePath ?? ""}].`);
+      }
+      const note = result.note;
+      return text(`slug: ${note.slug}\npath: ${note.path}\nmtimeMs: ${note.mtimeMs}\n\n${note.raw}`);
+    }),
+  );
+
+  server.registerTool(
+    "check_links",
+    {
+      title: "Check links and files",
+      description: "Report broken wikilinks, missing attachments, missing sources, and files that fail to parse. Run it after filing or gardening and fix everything it lists.",
+      annotations: { readOnlyHint: true },
+    },
+    guard(async () => text(formatLinkReport(await client.checkLinks()))),
+  );
+
+  server.registerTool(
+    "stats",
+    {
+      title: "Store statistics",
+      description: "Counts of indexed notes, files, and invalid files. Cheap way to confirm the server is reachable.",
+      annotations: { readOnlyHint: true },
+    },
+    guard(async () => {
+      const s = await client.stats();
+      return text(`notes: ${s.notes}\nfiles: ${s.files}\ninvalid: ${s.invalid}`);
+    }),
+  );
+
+  // ---- resources ------------------------------------------------------------
+
+  const markdownResource = (name: string, uri: string, file: string, description: string) => {
+    server.registerResource(name, uri, { title: name, description, mimeType: "text/markdown" }, async () => ({
+      contents: [{ uri, mimeType: "text/markdown", text: await readConvention(file) }],
+    }));
+  };
+  markdownResource("conventions", "brain://conventions", "conventions", "How the brain is organized. Read at the start of any session that touches notes.");
+  markdownResource("file", "brain://skills/file", "file", "The 'file this material' procedure.");
+  markdownResource("garden", "brain://skills/garden", "garden", "The 'tidy the store' procedure.");
+
+  // ---- prompts --------------------------------------------------------------
+
+  server.registerPrompt(
+    "file",
+    {
+      title: "File material into the brain",
+      description: "Process the inbox or material given in conversation: take sources, write atomic notes, update hubs, check links.",
+      argsSchema: { instructions: z.string().optional().describe("Anything the owner wants done differently this time.") },
+    },
+    async ({ instructions }) => ({
+      messages: [{ role: "user", content: { type: "text", text: withInstructions(await readConvention("file"), instructions) } }],
+    }),
+  );
+
+  server.registerPrompt(
+    "garden",
+    {
+      title: "Garden the brain",
+      description: "Fix broken links, merge duplicates, link orphans, refresh hubs, tighten summaries.",
+    },
+    async () => ({
+      messages: [{ role: "user", content: { type: "text", text: await readConvention("garden") } }],
+    }),
+  );
+
+  return server;
+}
+
+// ---- helpers ------------------------------------------------------------------
+
+function text(value: string): CallToolResult {
+  return { content: [{ type: "text", text: value }] };
+}
+
+/** Wrap a tool handler so any thrown error becomes an isError result instead of a protocol failure. */
+function guard<Args>(fn: (args: Args) => Promise<CallToolResult>): (args: Args) => Promise<CallToolResult> {
+  return async (args) => {
+    try {
+      return await fn(args);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { content: [{ type: "text", text: message }], isError: true };
+    }
+  };
+}
+
+function withInstructions(body: string, instructions: string | undefined): string {
+  const extra = instructions?.trim();
+  return extra ? `${body.trimEnd()}\n\n## Instructions from the owner\n\n${extra}\n` : body;
+}
+
+function formatSearchResult(r: SearchResult): string {
+  const kind = r.kind === "note" ? (r.type ?? "note") : "file";
+  const head = `[${kind}] ${r.id} — ${r.title}${r.summary ? ` — ${r.summary}` : ""}`;
+  const snippet = r.snippet.replace(/\s+/g, " ").trim();
+  return snippet ? `${head}\n    ${snippet}` : head;
+}
+
+function formatSummary(n: NoteSummary): string {
+  return `${n.slug} — ${n.title} — ${n.summary}`;
+}
+
+export function formatLinkReport(report: LinkReport): string {
+  const lines: string[] = [];
+  if (report.brokenLinks.length > 0) {
+    lines.push("Broken links:");
+    for (const b of report.brokenLinks) lines.push(`  ${b.from} -> [[${b.to}]]`);
+  }
+  if (report.missingFiles.length > 0) {
+    lines.push("Missing files:");
+    for (const m of report.missingFiles) lines.push(`  ${m.from} -> ${m.file}`);
+  }
+  if (report.missingSources.length > 0) {
+    lines.push("Missing sources:");
+    for (const m of report.missingSources) lines.push(`  ${m.from} -> ${m.source}`);
+  }
+  if (report.invalidNotes.length > 0) {
+    lines.push("Invalid notes:");
+    for (const i of report.invalidNotes) lines.push(`  ${i.path}: ${i.error}`);
+  }
+  return lines.length === 0 ? "No problems." : lines.join("\n");
+}

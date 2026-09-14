@@ -1,0 +1,302 @@
+/**
+ * Keyword, semantic, and hybrid ranking over the index tables.
+ *
+ * Keyword: FTS5 MATCH with bm25 ranking and snippet() excerpts, over notes and
+ * (optionally) files. Semantic: embed the query, nearest chunks (sqlite-vec KNN
+ * or in-process cosine), best chunk per note. Hybrid: reciprocal rank fusion of
+ * the two lists. Every result set is sorted by descending score.
+ */
+
+import type { NoteType, SearchResult } from "../types.ts";
+import { blobToVector, type IndexDb, type Row } from "./db.ts";
+import type { Embedder } from "./embeddings.ts";
+
+export interface SearchFilters {
+  tag?: string;
+  type?: NoteType;
+}
+
+/** How many candidates each ranked list contributes before fusion or truncation. */
+export const CANDIDATES = 50;
+/** How many chunks the KNN step looks at before aggregating per note. */
+const KNN_CHUNKS = 300;
+export const RRF_K = 60;
+
+/**
+ * Build an FTS5 MATCH expression from free text. Every term is double-quoted
+ * (inner quotes doubled) so operators and punctuation in the query are literal.
+ */
+export function buildMatchExpression(query: string, joiner: " " | " OR " = " "): string {
+  const terms = query
+    .split(/\s+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0)
+    .map((t) => `"${t.replace(/"/g, '""')}"`);
+  return terms.join(joiner);
+}
+
+/** Reciprocal rank fusion. Each list is ordered best first; ids may repeat across lists. */
+export function reciprocalRankFusion(lists: string[][], k: number = RRF_K): Map<string, number> {
+  const scores = new Map<string, number>();
+  for (const list of lists) {
+    list.forEach((id, i) => {
+      scores.set(id, (scores.get(id) ?? 0) + 1 / (k + i + 1));
+    });
+  }
+  return scores;
+}
+
+export function cosine(a: Float32Array, b: Float32Array): number {
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) {
+    const x = a[i] ?? 0;
+    const y = b[i] ?? 0;
+    dot += x * y;
+    na += x * x;
+    nb += y * y;
+  }
+  if (na === 0 || nb === 0) return 0;
+  return dot / (Math.sqrt(na) * Math.sqrt(nb));
+}
+
+/** The JS fallback for KNN: cosine similarity over every stored vector, top `k`. */
+export function cosineTopK(
+  query: Float32Array,
+  rows: Iterable<{ id: number; vector: Float32Array }>,
+  k: number,
+): Array<{ id: number; similarity: number }> {
+  const scored: Array<{ id: number; similarity: number }> = [];
+  for (const row of rows) scored.push({ id: row.id, similarity: cosine(query, row.vector) });
+  scored.sort((a, b) => b.similarity - a.similarity);
+  return scored.slice(0, k);
+}
+
+interface NoteHit {
+  slug: string;
+  path: string;
+  title: string;
+  type: NoteType;
+  summary: string;
+  tags: string[];
+  snippet: string;
+  score: number;
+}
+
+interface FileHit {
+  path: string;
+  title: string;
+  snippet: string;
+  score: number;
+}
+
+function filterSql(filters: SearchFilters, alias: string): { sql: string; params: string[] } {
+  const clauses: string[] = [];
+  const params: string[] = [];
+  if (filters.type) {
+    clauses.push(`${alias}.type = ?`);
+    params.push(filters.type);
+  }
+  if (filters.tag) {
+    clauses.push(`EXISTS (SELECT 1 FROM json_each(${alias}.tags_json) WHERE json_each.value = ?)`);
+    params.push(filters.tag);
+  }
+  return { sql: clauses.length ? ` AND ${clauses.join(" AND ")}` : "", params };
+}
+
+function parseTags(json: unknown): string[] {
+  try {
+    const parsed: unknown = JSON.parse(String(json));
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
+function noteRowToHit(row: Row, snippet: string, score: number): NoteHit {
+  return {
+    slug: String(row.slug),
+    path: String(row.path),
+    title: String(row.title),
+    type: String(row.type) as NoteType,
+    summary: String(row.summary),
+    tags: parseTags(row.tags_json),
+    snippet,
+    score,
+  };
+}
+
+function keywordNotes(idx: IndexDb, match: string, filters: SearchFilters, limit: number): NoteHit[] {
+  const f = filterSql(filters, "n");
+  const rows = idx.db
+    .prepare(
+      `SELECT n.slug, n.path, n.title, n.type, n.summary, n.tags_json,
+              bm25(notes_fts, 4.0, 3.0, 2.0, 1.0) AS rank,
+              snippet(notes_fts, -1, '«', '»', '…', 24) AS snippet
+       FROM notes_fts JOIN notes n ON n.slug = notes_fts.slug
+       WHERE notes_fts MATCH ?${f.sql}
+       ORDER BY rank LIMIT ?`,
+    )
+    .all(match, ...f.params, limit);
+  return rows.map((r) => noteRowToHit(r, String(r.snippet ?? ""), -Number(r.rank)));
+}
+
+function keywordFiles(idx: IndexDb, match: string, limit: number): FileHit[] {
+  const rows = idx.db
+    .prepare(
+      `SELECT f.path, f.title, bm25(files_fts, 3.0, 1.0) AS rank,
+              snippet(files_fts, -1, '«', '»', '…', 24) AS snippet
+       FROM files_fts JOIN files f ON f.path = files_fts.path
+       WHERE files_fts MATCH ?
+       ORDER BY rank LIMIT ?`,
+    )
+    .all(match, limit);
+  return rows.map((r) => ({
+    path: String(r.path),
+    title: String(r.title),
+    snippet: String(r.snippet ?? ""),
+    score: -Number(r.rank),
+  }));
+}
+
+function toResult(hit: NoteHit | FileHit, score: number): SearchResult {
+  if ("slug" in hit) {
+    return {
+      kind: "note",
+      id: hit.slug,
+      path: hit.path,
+      title: hit.title,
+      summary: hit.summary,
+      snippet: hit.snippet,
+      score,
+      tags: hit.tags,
+      type: hit.type,
+    };
+  }
+  return {
+    kind: "file",
+    id: hit.path,
+    path: hit.path,
+    title: hit.title,
+    summary: "",
+    snippet: hit.snippet,
+    score,
+    tags: [],
+  };
+}
+
+/** Keyword search: notes and files merged and sorted by bm25. Retries with OR when AND finds nothing. */
+export function keywordSearch(
+  idx: IndexDb,
+  query: string,
+  filters: SearchFilters,
+  includeFiles: boolean,
+  limit: number,
+): SearchResult[] {
+  // Files carry no tags or type, so a filter on either excludes them.
+  const withFiles = includeFiles && !filters.tag && !filters.type;
+  const run = (match: string): SearchResult[] => {
+    if (match.length === 0) return [];
+    const hits: SearchResult[] = keywordNotes(idx, match, filters, limit).map((h) => toResult(h, h.score));
+    if (withFiles) {
+      for (const h of keywordFiles(idx, match, limit)) hits.push(toResult(h, h.score));
+    }
+    hits.sort((a, b) => b.score - a.score);
+    return hits.slice(0, limit);
+  };
+  const strict = run(buildMatchExpression(query, " "));
+  if (strict.length > 0) return strict;
+  return run(buildMatchExpression(query, " OR "));
+}
+
+function nearestChunks(idx: IndexDb, vector: Float32Array, k: number): Array<{ id: number; similarity: number }> {
+  if (idx.vec) {
+    const rows = idx.db
+      .prepare(
+        `SELECT chunk_id, distance FROM chunk_vec WHERE embedding MATCH ? AND k = ? ORDER BY distance`,
+      )
+      .all(vector, BigInt(k));
+    // vec0 reports L2 distance; for unit vectors cos = 1 - d^2 / 2.
+    return rows.map((r) => {
+      const d = Number(r.distance);
+      return { id: Number(r.chunk_id), similarity: 1 - (d * d) / 2 };
+    });
+  }
+  const rows = idx.db.prepare("SELECT chunk_id, embedding FROM chunk_vectors").all();
+  return cosineTopK(
+    vector,
+    rows.map((r) => ({ id: Number(r.chunk_id), vector: blobToVector(r.embedding) })),
+    k,
+  );
+}
+
+/** Semantic search: best chunk per note, filtered, top `limit`. Null when the embedder is unavailable. */
+export async function semanticSearch(
+  idx: IndexDb,
+  embedder: Embedder,
+  query: string,
+  filters: SearchFilters,
+  limit: number,
+): Promise<SearchResult[] | null> {
+  const vectors = await embedder.embed([query]);
+  const qv = vectors?.[0];
+  if (!qv) return null;
+
+  const nearest = nearestChunks(idx, qv, KNN_CHUNKS);
+  if (nearest.length === 0) return [];
+
+  const chunkStmt = idx.db.prepare("SELECT slug, text FROM chunks WHERE id = ?");
+  const best = new Map<string, { similarity: number; text: string }>();
+  for (const { id, similarity } of nearest) {
+    const row = chunkStmt.get(id);
+    if (!row) continue;
+    const slug = String(row.slug);
+    const prev = best.get(slug);
+    if (!prev || similarity > prev.similarity) best.set(slug, { similarity, text: String(row.text) });
+  }
+
+  const f = filterSql(filters, "n");
+  const noteStmt = idx.db.prepare(
+    `SELECT n.slug, n.path, n.title, n.type, n.summary, n.tags_json FROM notes n WHERE n.slug = ?${f.sql}`,
+  );
+  const hits: SearchResult[] = [];
+  for (const [slug, { similarity, text }] of best) {
+    const row = noteStmt.get(slug, ...f.params);
+    if (!row) continue;
+    hits.push(toResult(noteRowToHit(row, text.slice(0, 200), similarity), similarity));
+  }
+  hits.sort((a, b) => b.score - a.score);
+  return hits.slice(0, limit);
+}
+
+/** Hybrid: reciprocal rank fusion of the keyword and semantic lists. */
+export async function hybridSearch(
+  idx: IndexDb,
+  embedder: Embedder,
+  query: string,
+  filters: SearchFilters,
+  includeFiles: boolean,
+  limit: number,
+): Promise<SearchResult[]> {
+  const keyword = keywordSearch(idx, query, filters, includeFiles, CANDIDATES);
+  const semantic = await semanticSearch(idx, embedder, query, filters, CANDIDATES);
+  if (!semantic || semantic.length === 0) return keyword.slice(0, limit);
+
+  const key = (r: SearchResult) => `${r.kind}:${r.id}`;
+  const fused = reciprocalRankFusion([keyword.map(key), semantic.map(key)]);
+
+  // Prefer the keyword hit (its snippet carries match markers) when both lists have the item.
+  const byKey = new Map<string, SearchResult>();
+  for (const r of semantic) byKey.set(key(r), r);
+  for (const r of keyword) byKey.set(key(r), r);
+
+  const out: SearchResult[] = [];
+  for (const [k, score] of fused) {
+    const r = byKey.get(k);
+    if (r) out.push({ ...r, score });
+  }
+  out.sort((a, b) => b.score - a.score);
+  return out.slice(0, limit);
+}

@@ -1,0 +1,41 @@
+{
+  "name": "notesplusplus",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A personal second brain that an AI agent reads and writes.",
+  "scripts": {
+    "start": "tsx src/server.ts",
+    "dev": "tsx watch src/server.ts",
+    "mcp": "tsx src/mcp.ts",
+    "reindex": "tsx src/cli/reindex.ts",
+    "init-brain": "tsx src/cli/init-brain.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.1",
+    "@huggingface/transformers": "^4.2.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "dotenv": "^17.4.2",
+    "gray-matter": "^4.0.3",
+    "hono": "^4.13.7",
+    "mammoth": "^1.12.3",
+    "marked": "^18.0.13",
+    "simple-git": "^3.36.0",
+    "sqlite-vec": "^0.1.9",
+    "unpdf": "^1.8.1",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.4"
+  },
+  "devDependencies": {
+    "@types/node": "^26.5.1",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.0"
+  }
+}
