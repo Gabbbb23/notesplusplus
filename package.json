@@ -12,7 +12,11 @@
     "init-brain": "tsx src/cli/init-brain.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "build:web": "npm --prefix web run build",
+    "dev:web": "npm --prefix web run dev",
+    "test:web": "npm --prefix web test",
+    "extract": "tsx src/cli/extract.ts"
   },
   "engines": {
     "node": ">=24"
@@ -22,8 +26,10 @@
     "@huggingface/transformers": "^4.2.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "dotenv": "^17.4.2",
+    "exceljs": "^4.4.0",
     "gray-matter": "^4.0.3",
     "hono": "^4.13.7",
+    "jszip": "^3.10.2",
     "mammoth": "^1.12.3",
     "marked": "^18.0.13",
     "simple-git": "^3.36.0",

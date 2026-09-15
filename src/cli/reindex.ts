@@ -1,4 +1,3 @@
-import path from "node:path";
 import { config } from "../config.ts";
 import { BrainImpl } from "../core/brain.ts";
 import { createIndex } from "../core/index/index.ts";
@@ -6,8 +5,8 @@ import { createStore } from "../core/store/index.ts";
 
 const store = createStore(config.brainPath);
 const index = createIndex({
-  dbPath: path.join(config.cachePath, "index.sqlite"),
-  modelCachePath: path.join(config.cachePath, "models"),
+  dbPath: config.indexPath,
+  modelCachePath: config.modelCachePath,
 });
 const brain = new BrainImpl(store, index);
 

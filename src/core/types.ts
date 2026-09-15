@@ -7,7 +7,7 @@
  * Brain repo layout (BRAIN_PATH):
  *   notes/<slug>.md      type: note | hub   (notes/index.md is the root hub)
  *   sources/<slug>.md    type: source        raw material kept verbatim, with a frontmatter header
- *   files/**             attachments (pdf, docx, images, anything)
+ *   files/**             attachments (pdf, docx, pptx, xlsx, images, anything)
  *   inbox/**             raw material dropped by the owner, waiting for the agent
  *   tags.yml             tag registry: list of { name, description }
  *   .git                 auto-committed on every write

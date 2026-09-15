@@ -4,6 +4,9 @@ import path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { createIndex, type Embedder, type IndexOptions } from "../src/core/index/index.ts";
 import { chunkBody } from "../src/core/index/embeddings.ts";
+import { extractFileText } from "../src/core/index/extract.ts";
+import ExcelJS from "exceljs";
+import JSZip from "jszip";
 import {
   buildMatchExpression,
   cosineTopK,
@@ -111,6 +114,71 @@ function fakeEmbedder(dims = 32): Embedder {
       });
     },
   };
+}
+
+/** A minimal but real pptx: the parts PowerPoint needs, plus the given slide/notes bodies. */
+async function buildPptx(parts: { slides: Record<number, string[]>; notes: Record<number, string> }): Promise<Buffer> {
+  const zip = new JSZip();
+  const ns =
+    'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"';
+  const shape = (body: string): string => `<p:sp><p:txBody><a:bodyPr/>${body}</p:txBody></p:sp>`;
+  const overrides: string[] = [];
+  const slideIds: string[] = [];
+  const presRels: string[] = [];
+
+  for (const [key, bodies] of Object.entries(parts.slides)) {
+    const n = Number(key);
+    zip.file(
+      `ppt/slides/slide${n}.xml`,
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:sld ${ns}><p:cSld><p:spTree>${bodies.map(shape).join("")}</p:spTree></p:cSld></p:sld>`,
+    );
+    overrides.push(`<Override PartName="/ppt/slides/slide${n}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`);
+    slideIds.push(`<p:sldId id="${255 + n}" r:id="rId${n}"/>`);
+    presRels.push(`<Relationship Id="rId${n}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide${n}.xml"/>`);
+    const notesBody = parts.notes[n];
+    if (notesBody !== undefined) {
+      zip.file(
+        `ppt/notesSlides/notesSlide${n}.xml`,
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:notes ${ns}><p:cSld><p:spTree>${shape(notesBody)}</p:spTree></p:cSld></p:notes>`,
+      );
+      zip.file(
+        `ppt/slides/_rels/slide${n}.xml.rels`,
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide" Target="../notesSlides/notesSlide${n}.xml"/></Relationships>`,
+      );
+      overrides.push(`<Override PartName="/ppt/notesSlides/notesSlide${n}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml"/>`);
+    }
+  }
+
+  zip.file(
+    "[Content_Types].xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>${overrides.join("")}</Types>`,
+  );
+  zip.file(
+    "_rels/.rels",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/></Relationships>`,
+  );
+  zip.file(
+    "ppt/presentation.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:presentation ${ns}><p:sldIdLst>${slideIds.join("")}</p:sldIdLst></p:presentation>`,
+  );
+  zip.file(
+    "ppt/_rels/presentation.xml.rels",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${presRels.join("")}</Relationships>`,
+  );
+  return zip.generateAsync({ type: "nodebuffer" });
+}
+
+/** Two sheets: a header row, a formula with a cached result, a blank row, a date; then a single sentence. */
+async function buildXlsx(): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  const budget = wb.addWorksheet("Budget");
+  budget.addRow(["Item", "Qty", "Price", "Total"]);
+  budget.addRow(["Widget", 2, 3.5]);
+  budget.getCell("D2").value = { formula: "B2*C2", result: 7 };
+  budget.getCell("A4").value = "Ordered";
+  budget.getCell("B4").value = new Date(Date.UTC(2026, 8, 14));
+  wb.addWorksheet("Notes").addRow(["Remember the platypus invoice"]);
+  return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
 // ---- schema and lifecycle -------------------------------------------------
@@ -351,6 +419,96 @@ describe("rebuild and files", () => {
     await idx.upsertFile({ path: "files/missing.txt", ext: "txt", sizeBytes: 1, mtimeMs: 1 }, "C:/does/not/exist/missing.txt");
     expect((await idx.search("photo")).map((r) => r.id)).toEqual(["files/photo.jpg"]);
     expect((await idx.search("missing")).map((r) => r.id)).toEqual(["files/missing.txt"]);
+  });
+  test("pptx: slide text in numeric order, entities decoded, notes attached", async () => {
+    const root = await tempDir();
+    const abs = path.join(root, "deck.pptx");
+    await fs.writeFile(abs, await buildPptx({
+      slides: {
+        1: ["<a:p><a:r><a:t>Quarterly </a:t></a:r><a:r><a:t>roadmap</a:t></a:r></a:p><a:p><a:r><a:t>R&amp;D &lt;budget&gt; &#8364;5k &quot;final&quot;</a:t></a:r></a:p>"],
+        2: ["<a:p><a:r><a:t>Hire a zookeeper</a:t></a:r></a:p><a:p></a:p>"],
+      },
+      notes: {
+        1: '<a:p><a:r><a:t>Speaker reminder: mention lemurs</a:t></a:r></a:p><a:p><a:fld id="{X}" type="slidenum"><a:t>1</a:t></a:fld></a:p>',
+      },
+    }));
+
+    const text = await extractFileText(abs, "pptx");
+    expect(text).toBe(
+      [
+        "## Slide 1",
+        "Quarterly roadmap",
+        'R&D <budget> €5k "final"',
+        "Notes:",
+        "Speaker reminder: mention lemurs",
+        "",
+        "## Slide 2",
+        "Hire a zookeeper",
+      ].join("\n"),
+    );
+  });
+
+  test("pptx: slides sort numerically, not lexically", async () => {
+    const root = await tempDir();
+    const abs = path.join(root, "long.pptx");
+    const slides: Record<number, string[]> = {};
+    for (let n = 1; n <= 11; n++) slides[n] = [`<a:p><a:r><a:t>Page ${n}</a:t></a:r></a:p>`];
+    await fs.writeFile(abs, await buildPptx({ slides, notes: {} }));
+
+    const text = await extractFileText(abs, "pptx");
+    const pages = [...text.matchAll(/^Page (\d+)$/gm)].map((m) => Number(m[1]));
+    expect(pages).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    expect(text).toContain("## Slide 11\nPage 11");
+  });
+
+  test("xlsx: one block per sheet, rows joined with pipes, formulas and dates rendered", async () => {
+    const root = await tempDir();
+    const abs = path.join(root, "book.xlsx");
+    await fs.writeFile(abs, await buildXlsx());
+
+    const text = await extractFileText(abs, "xlsx");
+    expect(text).toBe(
+      [
+        "## Sheet: Budget",
+        "Item | Qty | Price | Total",
+        "Widget | 2 | 3.5 | 7",
+        "Ordered | 2026-09-14",
+        "",
+        "## Sheet: Notes",
+        "Remember the platypus invoice",
+      ].join("\n"),
+    );
+
+    // Same bytes under the macro-enabled extension take the same path.
+    const xlsm = path.join(root, "book.xlsm");
+    await fs.copyFile(abs, xlsm);
+    expect(await extractFileText(xlsm, "xlsm")).toBe(text);
+  });
+
+  test("garbage pptx and xlsx yield empty text without throwing", async () => {
+    const root = await tempDir();
+    const junk = Buffer.from([0x00, 0x01, 0xff, 0xfe, 0x42, 0x42, 0x50, 0x4b]);
+    for (const name of ["junk.pptx", "junk.xlsx", "junk.xlsm"]) {
+      const abs = path.join(root, name);
+      await fs.writeFile(abs, junk);
+      await expect(extractFileText(abs, path.extname(name).slice(1))).resolves.toBe("");
+    }
+  });
+
+  test("slide and cell content is findable through the index", async () => {
+    const { idx } = await makeIndex();
+    const root = await tempDir();
+    const deck = path.join(root, "deck.pptx");
+    const book = path.join(root, "book.xlsx");
+    await fs.writeFile(deck, await buildPptx({ slides: { 1: ["<a:p><a:r><a:t>Hire a zookeeper</a:t></a:r></a:p>"] }, notes: {} }));
+    await fs.writeFile(book, await buildXlsx());
+
+    await idx.upsertFile({ path: "files/deck.pptx", ext: "pptx", sizeBytes: 1, mtimeMs: 1 }, deck);
+    await idx.upsertFile({ path: "files/book.xlsx", ext: "xlsx", sizeBytes: 1, mtimeMs: 1 }, book);
+
+    expect((await idx.search("zookeeper")).map((r) => r.id)).toEqual(["files/deck.pptx"]);
+    expect((await idx.search("platypus")).map((r) => r.id)).toEqual(["files/book.xlsx"]);
+    expect(await idx.stats()).toMatchObject({ files: 2 });
   });
 });
 
