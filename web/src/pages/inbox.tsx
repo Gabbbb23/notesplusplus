@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
+import { TOP_LEVEL_CRUMBS } from "@/lib/breadcrumb-items";
 import { formatBytes, formatTime } from "@/lib/format";
 import type { InboxItem } from "@/lib/types";
 import { useAsync } from "@/lib/use-async";
@@ -88,7 +89,7 @@ export function InboxPage() {
   const items = useAsync(() => api.inbox(), []);
   return (
     <>
-      <PageHeader title="Inbox" description="Material waiting for the agent." />
+      <PageHeader title="Inbox" description="Material waiting for the agent." breadcrumbs={TOP_LEVEL_CRUMBS} />
       <div className="mb-8">
         {items.loading && <LoadingBlock lines={3} />}
         {items.error && <ErrorAlert error={items.error} />}

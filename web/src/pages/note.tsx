@@ -1,7 +1,8 @@
 import { useParams } from "react-router";
-import { KindBadge, TagBadges } from "@/components/badges";
+import { KindBadge, TagBadges, TagName } from "@/components/badges";
 import { BreakableText } from "@/components/breakable-text";
 import { Callout } from "@/components/callout";
+import { FileLink } from "@/components/file-actions";
 import { LoadingCards } from "@/components/item-card";
 import { MetaItem, MetaList } from "@/components/meta";
 import { NoteBody, SourceBody } from "@/components/note-body";
@@ -11,13 +12,15 @@ import { ErrorAlert, LoadingBlock, NotFoundState } from "@/components/page-state
 import { SectionHeading } from "@/components/section-heading";
 import { TextLink } from "@/components/text-link";
 import { Separator } from "@/components/ui/separator";
-import { api, ApiError, fileUrl, noteUrl } from "@/lib/api";
+import { api, ApiError, noteUrl } from "@/lib/api";
+import { noteCrumbs } from "@/lib/breadcrumb-items";
 import { useAsync } from "@/lib/use-async";
 
 export function NotePage() {
   const { slug = "" } = useParams();
   const note = useAsync(() => api.getNote(slug), [slug]);
   const backlinks = useAsync(() => api.backlinks(slug), [slug]);
+  const trail = useAsync(() => api.noteTrail(slug), [slug]);
 
   if (note.loading) return <LoadingBlock lines={10} />;
   if (note.error) {
@@ -30,10 +33,13 @@ export function NotePage() {
 
   const n = note.data;
   const fm = n.frontmatter;
+  // Home alone while the trail loads or when it failed; a stale trail from the previous slug never shows.
+  const settledTrail = trail.loading || trail.error ? undefined : trail.data;
+  const breadcrumbs = noteCrumbs(settledTrail, n.tags, (tag) => <TagName name={tag} />);
 
   return (
     <article>
-      <PageHeader title={n.title} badge={<KindBadge kind={n.type} />}>
+      <PageHeader title={n.title} badge={<KindBadge kind={n.type} />} breadcrumbs={breadcrumbs}>
         {n.summary && <Callout>{n.summary}</Callout>}
         <MetaList>
           {n.tags.length > 0 && (
@@ -57,11 +63,11 @@ export function NotePage() {
           )}
           {fm.files && fm.files.length > 0 && (
             <MetaItem label="Files">
-              {fm.files.map((f) => (
-                <TextLink key={f} href={fileUrl(f)}>
-                  {f}
-                </TextLink>
-              ))}
+              <span className="flex w-full min-w-0 flex-col gap-1">
+                {fm.files.map((f) => (
+                  <FileLink key={f} path={f} />
+                ))}
+              </span>
             </MetaItem>
           )}
         </MetaList>

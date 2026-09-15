@@ -1,27 +1,33 @@
 import type { ReactNode } from "react";
 import { BreakableText } from "@/components/breakable-text";
+import { Breadcrumbs } from "@/components/breadcrumbs";
+import type { Crumb } from "@/lib/breadcrumb-items";
 
 /**
- * The top of every page: one h1 size everywhere, an optional badge after the title,
- * an optional aside on the right (a count), a muted description, and optional extra
- * rows (note metadata). A string title wraps at natural break points.
+ * The top of every page: optional breadcrumbs, then one h1 size everywhere, an optional badge
+ * after the title, an optional aside on the right (a count), a muted description, and optional
+ * extra rows (note metadata). A string title wraps at natural break points.
  */
 export function PageHeader({
   title,
   description,
   aside,
   badge,
+  breadcrumbs,
   children,
 }: {
   title: ReactNode;
   description?: ReactNode;
   aside?: ReactNode;
   badge?: ReactNode;
+  /** Where the page sits, shown above the title. Never includes the page itself. Home passes none. */
+  breadcrumbs?: readonly Crumb<ReactNode>[];
   /** Extra header content under the description, such as a note's tags and dates. */
   children?: ReactNode;
 }) {
   return (
     <header data-slot="page-header" className="mb-6 min-w-0 space-y-2 wrap-break-word">
+      {breadcrumbs && <Breadcrumbs items={breadcrumbs} />}
       <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-1">
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
           <h1 className="min-w-0 text-2xl font-semibold tracking-tight">

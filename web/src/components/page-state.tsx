@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError, NetworkError } from "@/lib/api";
+import { TOP_LEVEL_CRUMBS } from "@/lib/breadcrumb-items";
 
 /*
  * Loading, error, empty, and not-found states. Card placeholders (LoadingCards) live in
@@ -50,13 +51,14 @@ export function EmptyState({ children }: { children: ReactNode }) {
 
 /**
  * A page for something that does not exist: a title, one sentence ending in the missing
- * value as code ("There is no note with the slug x."), and a way back home.
+ * value as code ("There is no note with the slug x."), and a way back home. Its breadcrumbs are Home alone.
  */
 export function NotFoundState({ title, message, value }: { title: string; message: string; value: string }) {
   return (
     <div data-slot="not-found-state">
       <PageHeader
         title={title}
+        breadcrumbs={TOP_LEVEL_CRUMBS}
         description={
           <>
             {message} <BreakableText as="code" className="font-mono" text={value} />.

@@ -16,7 +16,8 @@ import { cn } from "@/lib/utils";
  *
  * Tables never scroll sideways. A table that fits is laid out as a normal table; one that
  * does not fit switches to a stacked layout where each row becomes a block of label and
- * value pairs. The choice is made by measuring, see chooseTableLayout.
+ * value pairs. The choice is made by measuring, see chooseTableLayout. A stacked table in a
+ * box at least 36rem wide lays each block's pairs out in a grid, see chooseStackArrangement.
  */
 
 // ---------------------------------------------------------------------------
@@ -109,12 +110,40 @@ export function chooseTableLayout(m: TableMeasurements): TableLayoutState {
   };
 }
 
+/**
+ * How a stacked table lays out each row's label and value pairs:
+ * "list" puts one pair per line (label beside value), "grid" puts the pairs in columns of at least
+ * 12rem with each label above its value, so a record with seven fields takes two or three lines.
+ */
+export type StackArrangement = "list" | "grid";
+
+/** A stacked table in a box at least this many rem wide uses the grid arrangement. */
+export const STACK_GRID_MIN_REM = 36;
+
+/**
+ * Pick the stacked arrangement for a box width. A box with no width (hidden, not laid out) keeps
+ * the current one. No hysteresis is needed: the grid is shorter than the list, so a scrollbar that
+ * comes or goes with the switch only moves the width further past the threshold.
+ */
+export function chooseStackArrangement(
+  current: StackArrangement,
+  availableWidth: number,
+  minGridWidth: number,
+): StackArrangement {
+  if (availableWidth <= 0) return current;
+  return availableWidth + EPSILON >= minGridWidth ? "grid" : "list";
+}
+
 function remInPx(): number {
   const size = parseFloat(getComputedStyle(document.documentElement).fontSize);
   return Number.isFinite(size) && size > 0 ? size : 16;
 }
 
-const INITIAL_STATE: TableLayoutState = { layout: "table", requiredWidth: null };
+interface MeasuredState extends TableLayoutState {
+  arrangement: StackArrangement;
+}
+
+const INITIAL_STATE: MeasuredState = { layout: "table", requiredWidth: null, arrangement: "list" };
 
 /**
  * Measure before paint (useLayoutEffect) and again whenever the wrapper or table resizes.
@@ -123,9 +152,9 @@ const INITIAL_STATE: TableLayoutState = { layout: "table", requiredWidth: null }
 function useTableLayout(mode: TableLayoutMode) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
-  const [state, setState] = useState<TableLayoutState>(INITIAL_STATE);
+  const [state, setState] = useState<MeasuredState>(INITIAL_STATE);
   // The state that is actually on screen. Measurements only make sense against it.
-  const onScreen = useRef<TableLayoutState>(INITIAL_STATE);
+  const onScreen = useRef<MeasuredState>(INITIAL_STATE);
   const measuring = mode === "auto" && typeof ResizeObserver !== "undefined";
 
   const measure = useCallback(() => {
@@ -148,8 +177,13 @@ function useTableLayout(mode: TableLayoutMode) {
       minTextWidth: TEXT_MIN_REM * rem,
       requiredWidth: current.requiredWidth,
     });
-    if (next.layout !== current.layout || next.requiredWidth !== current.requiredWidth) {
-      setState(next);
+    const arrangement = chooseStackArrangement(current.arrangement, wrapper.clientWidth, STACK_GRID_MIN_REM * rem);
+    if (
+      next.layout !== current.layout ||
+      next.requiredWidth !== current.requiredWidth ||
+      arrangement !== current.arrangement
+    ) {
+      setState({ ...next, arrangement });
     }
   }, []);
 
@@ -168,12 +202,15 @@ function useTableLayout(mode: TableLayoutMode) {
   }, [measuring, measure]);
 
   const layout: TableLayout = mode !== "auto" ? mode : measuring ? state.layout : "table";
-  return { wrapperRef, tableRef, layout };
+  const arrangement: StackArrangement = measuring ? state.arrangement : "list";
+  return { wrapperRef, tableRef, layout, arrangement };
 }
 
 // ---------------------------------------------------------------------------
 // Styles: the only table styles in the app. Stacked-layout rules hang off the
-// wrapper's data-layout attribute through the named Tailwind group "table".
+// wrapper's data-layout attribute through the named Tailwind group "table", and the two
+// stacked arrangements off its data-stack attribute ("list" or "grid", set only when stacked),
+// so list and grid rules never compete.
 // ---------------------------------------------------------------------------
 
 /**
@@ -193,8 +230,12 @@ const HEADER_CLASS = "bg-muted group-data-[layout=stacked]/table:sr-only";
 
 const BODY_CLASS = "group-data-[layout=stacked]/table:block";
 
+/**
+ * Stacked rows. List: one pair per line. Grid: columns of at least 12rem, as many as fit, with the
+ * title across the full width (PRIMARY_CLASS).
+ */
 const ROW_CLASS =
-  "group-data-[layout=stacked]/table:flex group-data-[layout=stacked]/table:flex-col group-data-[layout=stacked]/table:py-2";
+  "group-data-[layout=stacked]/table:py-2 group-data-[stack=list]/table:flex group-data-[stack=list]/table:flex-col group-data-[stack=grid]/table:grid group-data-[stack=grid]/table:grid-cols-[repeat(auto-fill,minmax(12rem,1fr))] group-data-[stack=grid]/table:gap-y-1";
 
 const CELL_CLASS =
   "h-auto px-3 py-2 align-top group-data-[layout=stacked]/table:w-auto group-data-[layout=stacked]/table:py-1 group-data-[layout=stacked]/table:text-left group-data-[layout=stacked]/table:whitespace-normal";
@@ -219,11 +260,14 @@ const ALIGN_CLASS = {
 } as const;
 
 const PRIMARY_CLASS =
-  "font-medium group-data-[layout=stacked]/table:order-first group-data-[layout=stacked]/table:block";
+  "font-medium group-data-[layout=stacked]/table:order-first group-data-[layout=stacked]/table:block group-data-[stack=grid]/table:col-span-full";
 
-/** Stacked layout: muted label (from data-label) on the left, value on the right. */
+/**
+ * Stacked layout: a small muted label (from data-label) with its value. List: label on the left,
+ * value on the right. Grid: label above value.
+ */
 const LABELLED_CLASS =
-  "group-data-[layout=stacked]/table:grid group-data-[layout=stacked]/table:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] group-data-[layout=stacked]/table:items-baseline group-data-[layout=stacked]/table:gap-x-3 group-data-[layout=stacked]/table:before:content-[attr(data-label)] group-data-[layout=stacked]/table:before:text-xs group-data-[layout=stacked]/table:before:font-normal group-data-[layout=stacked]/table:before:text-muted-foreground";
+  "group-data-[layout=stacked]/table:before:content-[attr(data-label)] group-data-[layout=stacked]/table:before:text-xs group-data-[layout=stacked]/table:before:font-normal group-data-[layout=stacked]/table:before:text-muted-foreground group-data-[stack=list]/table:grid group-data-[stack=list]/table:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] group-data-[stack=list]/table:items-baseline group-data-[stack=list]/table:gap-x-3 group-data-[stack=grid]/table:block group-data-[stack=grid]/table:before:block";
 
 /** Stacked layout without a label (an action column): the value takes the full row. */
 const UNLABELLED_CLASS = "group-data-[layout=stacked]/table:block";
@@ -333,8 +377,8 @@ export function TableCell({ label, ...props }: CellProps & { label?: string }) {
       role="cell"
       className={cn(
         cellClass(props),
-        !props.primary && (labelled ? LABELLED_CLASS : UNLABELLED_CLASS),
-        empty && !props.primary && EMPTY_CLASS,
+        // An empty cell gets only the hidden rule, so no display rule competes with it.
+        !props.primary && (empty ? EMPTY_CLASS : labelled ? LABELLED_CLASS : UNLABELLED_CLASS),
       )}
       data-label={label || undefined}
       data-empty={empty ? "" : undefined}
@@ -358,9 +402,15 @@ export interface ResponsiveTableProps {
 
 /** The bordered card, the table element, and the table-or-stacked switch. */
 export function ResponsiveTable({ children, caption, layout = "auto" }: ResponsiveTableProps) {
-  const { wrapperRef, tableRef, layout: rendered } = useTableLayout(layout);
+  const { wrapperRef, tableRef, layout: rendered, arrangement } = useTableLayout(layout);
   return (
-    <div ref={wrapperRef} data-slot="responsive-table" data-layout={rendered} className={WRAPPER_CLASS}>
+    <div
+      ref={wrapperRef}
+      data-slot="responsive-table"
+      data-layout={rendered}
+      data-stack={rendered === "stacked" ? arrangement : undefined}
+      className={WRAPPER_CLASS}
+    >
       <table ref={tableRef} role="table" data-slot="table" className={TABLE_CLASS}>
         {caption && <BaseTableCaption className="sr-only">{caption}</BaseTableCaption>}
         {children}

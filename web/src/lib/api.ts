@@ -2,16 +2,19 @@
  * The one typed client over the REST API (docs/rest-api.md).
  * Every page goes through these functions; nothing else calls fetch.
  */
+import { isLocalAbsolutePath } from "./file-kinds";
 import type {
   FileEntry,
   InboxItem,
   LinkReport,
   Note,
+  NoteListPage,
   NoteSummary,
+  NoteTrail,
   NoteType,
   SearchMode,
-  SearchResult,
-  Tag,
+  SearchResponse,
+  TagWithCount,
 } from "./types";
 
 export interface Stats {
@@ -79,6 +82,24 @@ export function fileUrl(relPath: string): string {
   return "/api/" + relPath.split("/").map(encodeURIComponent).join("/");
 }
 
+/** URL that serves a file outside the brain, e.g. "C:\a b.pdf" -> "/api/local-file?path=C%3A%5Ca%20b.pdf". */
+export function localFileUrl(absPath: string): string {
+  return `/api/local-file?path=${encodeURIComponent(absPath)}`;
+}
+
+/** Where View opens a file: an absolute Windows path goes through localFileUrl, a brain path through fileUrl. */
+export function viewUrlFor(path: string): string {
+  return isLocalAbsolutePath(path) ? localFileUrl(path) : fileUrl(path);
+}
+
+function postJson<T>(path: string, body: unknown): Promise<T> {
+  return request<T>(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 export function noteUrl(slug: string): string {
   return `/notes/${encodeURIComponent(slug)}`;
 }
@@ -88,8 +109,9 @@ export function tagUrl(tag: string): string {
 }
 
 export const api = {
-  listNotes(filter: { tag?: string; type?: NoteType } = {}): Promise<NoteSummary[]> {
-    return request<NoteSummary[]>(`/api/notes${query(filter)}`);
+  /** One page of notes by title. The server's default limit is 100, its maximum 500. */
+  listNotes(filter: { tag?: string; type?: NoteType; limit?: number; offset?: number } = {}): Promise<NoteListPage> {
+    return request<NoteListPage>(`/api/notes${query(filter)}`);
   },
 
   getNote(slug: string): Promise<Note> {
@@ -100,15 +122,22 @@ export const api = {
     return request<NoteSummary[]>(`/api/notes/${encodeURIComponent(slug)}/backlinks`);
   },
 
+  /** The hubs from index down to the hub that lists the note, for breadcrumbs. */
+  noteTrail(slug: string): Promise<NoteTrail> {
+    return request<NoteTrail>(`/api/notes/${encodeURIComponent(slug)}/trail`);
+  },
+
+  /** The best `limit` results (1 to 100), and whether more exist past them. */
   search(
     q: string,
     opts: { limit?: number; tag?: string; type?: NoteType; mode?: SearchMode; files?: boolean } = {},
-  ): Promise<SearchResult[]> {
-    return request<SearchResult[]>(`/api/search${query({ q, ...opts })}`);
+  ): Promise<SearchResponse> {
+    return request<SearchResponse>(`/api/search${query({ q, ...opts })}`);
   },
 
-  tags(): Promise<Tag[]> {
-    return request<Tag[]>("/api/tags");
+  /** Every tag with the number of notes carrying it. */
+  tags(): Promise<TagWithCount[]> {
+    return request<TagWithCount[]>("/api/tags");
   },
 
   inbox(): Promise<InboxItem[]> {
@@ -125,6 +154,16 @@ export const api = {
 
   files(): Promise<FileEntry[]> {
     return request<FileEntry[]>("/api/files");
+  },
+
+  /** Open a file in its default Windows app, or a folder in File Explorer. path is brain-relative or absolute. */
+  openFile(path: string): Promise<{ opened: string }> {
+    return postJson<{ opened: string }>("/api/open", { path });
+  },
+
+  /** Show a file selected in File Explorer, or open a folder. path is brain-relative or absolute. */
+  revealFile(path: string): Promise<{ revealed: string }> {
+    return postJson<{ revealed: string }>("/api/reveal", { path });
   },
 
   checkLinks(): Promise<LinkReport> {

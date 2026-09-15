@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  chooseStackArrangement,
   chooseTableLayout,
   FILL_MIN_REM,
   RETURN_SLACK_PX,
+  STACK_GRID_MIN_REM,
   TEXT_MIN_REM,
   type TableMeasurements,
 } from "../src/components/data-table";
@@ -133,6 +135,35 @@ describe("chooseTableLayout", () => {
     expect(back(1200)).toEqual({ layout: "table", requiredWidth: null });
   });
 
+  describe("note tables in the note column", () => {
+    // layout.tsx: main is max-w-[52rem] with md:px-8, so a note body is 52rem - 2 * 2rem = 48rem wide.
+    const REM = 16;
+    const NOTE_COLUMN = (52 - 4) * REM;
+    // A text column never renders narrower than its 6rem minimum plus the cell's px-3 padding.
+    const MIN_TEXT_COLUMN = TEXT_MIN_REM * REM + 2 * 12;
+
+    it("keeps a 5-column table with short cells as a table at 1280px", () => {
+      // Subject | Day | Time | Room | Units, as the browser lays it out: the table fills the column.
+      const widths = [260, 120, 148, 120, 120];
+      expect(widths.reduce((a, b) => a + b)).toBe(NOTE_COLUMN);
+      expect(Math.min(...widths)).toBeGreaterThanOrEqual(MIN_TEXT_COLUMN);
+      expect(
+        chooseTableLayout(inTable({ availableWidth: NOTE_COLUMN, tableWidth: NOTE_COLUMN, textColumnWidths: widths, minTextWidth: TEXT_MIN_REM * REM })),
+      ).toEqual({ layout: "table", requiredWidth: null });
+    });
+
+    it("has room for 5 text columns at their minimum but not for 7, which stack", () => {
+      expect(5 * MIN_TEXT_COLUMN).toBeLessThanOrEqual(NOTE_COLUMN);
+      expect(7 * MIN_TEXT_COLUMN).toBeGreaterThan(NOTE_COLUMN);
+      const seven = Array(7).fill(MIN_TEXT_COLUMN);
+      expect(
+        chooseTableLayout(
+          inTable({ availableWidth: NOTE_COLUMN, tableWidth: 7 * MIN_TEXT_COLUMN, textColumnWidths: seven, minTextWidth: TEXT_MIN_REM * REM }),
+        ).layout,
+      ).toBe("stacked");
+    });
+  });
+
   it("keeps the current layout when the wrapper has no width (hidden)", () => {
     expect(chooseTableLayout(inTable({ availableWidth: 0, tableWidth: 500 }))).toEqual({
       layout: "table",
@@ -150,5 +181,23 @@ describe("chooseTableLayout", () => {
         requiredWidth: 700,
       }),
     ).toEqual({ layout: "stacked", requiredWidth: 700 });
+  });
+});
+
+describe("chooseStackArrangement", () => {
+  const MIN_GRID = STACK_GRID_MIN_REM * 16;
+
+  it("uses a grid of pairs from 36rem (576px) and one pair per line below", () => {
+    expect(STACK_GRID_MIN_REM).toBe(36);
+    expect(chooseStackArrangement("list", 768, MIN_GRID)).toBe("grid");
+    expect(chooseStackArrangement("list", 576, MIN_GRID)).toBe("grid");
+    expect(chooseStackArrangement("list", 575.8, MIN_GRID)).toBe("grid");
+    expect(chooseStackArrangement("grid", 575, MIN_GRID)).toBe("list");
+    expect(chooseStackArrangement("grid", 368, MIN_GRID)).toBe("list");
+  });
+
+  it("keeps the current arrangement when the box has no width (hidden)", () => {
+    expect(chooseStackArrangement("grid", 0, MIN_GRID)).toBe("grid");
+    expect(chooseStackArrangement("list", 0, MIN_GRID)).toBe("list");
   });
 });

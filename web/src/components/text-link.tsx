@@ -9,17 +9,26 @@ import { cn } from "@/lib/utils";
  * bodies. This is the only module that styles a link or draws the external-link icon.
  */
 
-const LINK_CLASS = "min-w-0 text-primary hover:text-primary-hover hover:underline";
+const LINK_CLASS = "min-w-0 hover:underline";
 
-export type TextLinkVariant = "inline" | "strong" | "title";
+/** The blue of every link except the quiet wayfinding ones. */
+const PRIMARY = "text-primary hover:text-primary-hover";
+
+export type TextLinkVariant = "inline" | "strong" | "title" | "muted";
 
 const VARIANT_CLASS: Record<TextLinkVariant, string> = {
   /** Inherits the surrounding size and weight. */
-  inline: "",
+  inline: PRIMARY,
   /** Medium weight: a slug or tag that names the row it sits in. */
-  strong: "font-medium",
+  strong: `${PRIMARY} font-medium`,
   /** A card title. */
-  title: "text-base font-medium",
+  title: `${PRIMARY} text-base font-medium`,
+  /**
+   * Quiet wayfinding, such as a breadcrumb: muted text that turns foreground on hover, a hit area at
+   * least 24px tall (padding only, no visual change), and a plainly visible focus ring.
+   */
+  muted:
+    "inline-block min-h-6 rounded-sm py-0.5 text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
 };
 
 /** Shown after an external link's text. Sits inline so it follows the last line of wrapped text. */

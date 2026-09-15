@@ -8,9 +8,11 @@ import { describe, expect, it } from "vitest";
  * Guards the "one shared component per UI pattern" and "tables never scroll sideways"
  * decisions (DECISIONS.md, 2026-09-14). Every .ts and .tsx file under src, except the shadcn
  * primitives in components/ui, composes the shared components in src/components. Nothing
- * reaches past them to a primitive, hand-builds a table, heading, link, or alert, scrolls
- * sideways, restyles a primitive's colours, or hard-codes a colour. src/index.css may only
- * scroll code blocks sideways.
+ * reaches past them to a primitive, hand-builds a table, heading, link, alert, or keycap, places
+ * breadcrumbs anywhere but PageHeader, builds a file URL instead of using FileActions, builds its
+ * own "Show more" button instead of using ShowMore, scrolls sideways, restyles a primitive's
+ * colours, or hard-codes a colour. src/index.css may only scroll
+ * code blocks sideways.
  *
  * Each rule has fixtures below proving it flags the pattern, so a rule that silently stops
  * matching fails the suite instead of passing it.
@@ -96,10 +98,10 @@ function balancedBraces(source: string, start: number): string {
   return source.slice(start);
 }
 
-/** Each JSX opening tag for one of the named components, from "<Name" to its closing ">". */
-function openingTags(source: string, names: string[]): Array<{ name: string; tag: string }> {
+/** Each JSX opening tag for one of the named components, from "<Name" to its closing ">", and the index after it. */
+function openingTags(source: string, names: string[]): Array<{ name: string; tag: string; end: number }> {
   const re = new RegExp(`<(${names.join("|")})(?![\\w.$])`, "g");
-  const tags: Array<{ name: string; tag: string }> = [];
+  const tags: Array<{ name: string; tag: string; end: number }> = [];
   for (const m of source.matchAll(re)) {
     let depth = 0;
     let quote: string | null = null;
@@ -119,9 +121,18 @@ function openingTags(source: string, names: string[]): Array<{ name: string; tag
         break;
       }
     }
-    tags.push({ name: m[1]!, tag: source.slice(m.index, end + 1) });
+    tags.push({ name: m[1]!, tag: source.slice(m.index, end + 1), end: end + 1 });
   }
   return tags;
+}
+
+/** Each element for the named component: the opening tag and, unless it closes itself, everything up to its closing tag. */
+function elements(source: string, name: string): string[] {
+  return openingTags(source, [name]).map(({ tag, end }) => {
+    if (tag.endsWith("/>")) return tag;
+    const close = source.indexOf(`</${name}`, end);
+    return tag + source.slice(end, close === -1 ? undefined : close);
+  });
 }
 
 /** The value of a className attribute in an opening tag: the quoted string or the {expression}. */
@@ -196,10 +207,18 @@ const RAW_TABLE_JSX = new RegExp(`<(${TABLE_TAGS})(?=[\\s>/])`);
 const TABLE_ROLE = /\brole\s*[=:]\s*\{?\s*["'`](table|grid|treegrid)["'`]/;
 const CREATE_TABLE = new RegExp(`\\b(?:createElement|jsxs?|jsxDEV)\\s*\\(\\s*["'\`](${TABLE_TAGS})["'\`]`);
 const RAW_H1 = /<h1(?=[\s>/])|\b(?:createElement|jsxs?|jsxDEV)\s*\(\s*["'`]h1["'`]/;
+const RAW_KBD = /<kbd(?=[\s>/])|\b(?:createElement|jsxs?|jsxDEV)\s*\(\s*["'`]kbd["'`]/;
 const SCROLL_CLASS = /(?<![\w-])overflow-(?:x-)?(?:auto|scroll)(?![\w-])/;
 const SCROLL_STYLE = /\boverflowX\b|\boverflow\s*:\s*["'`](?:auto|scroll)["'`]|\boverflow(?:-x)?\s*:\s*(?:auto|scroll)\b/;
+const FILE_URL_CALL = /\b(fileUrl|localFileUrl|viewUrlFor)\s*\(/;
+const RENDERED_BREADCRUMBS = /<Breadcrumbs(?![\w.$])|\b(?:createElement|jsxs?|jsxDEV)\s*\(\s*Breadcrumbs\b/;
+const BREADCRUMB_ADVICE =
+  "Pass the items to PageHeader's breadcrumbs prop (@/components/page-header), so every page places them the same way.";
 
 const TABLE_ADVICE = "Use DataTable, or ResponsiveTable with its Table* primitives, from @/components/data-table.";
+
+/** Words that mark a button as growing a list. */
+const MORE_WORDING = /\b(?:show|load|see|view)\s+more\b/i;
 
 const RULES: Rule[] = [
   {
@@ -232,11 +251,29 @@ const RULES: Rule[] = [
         : null,
   },
   {
+    name: "shadcn breadcrumb import",
+    allowed: ["components/breadcrumbs.tsx"],
+    check: (s) => (importsUi(s, "breadcrumb") ? `imports @/components/ui/breadcrumb. ${BREADCRUMB_ADVICE}` : null),
+  },
+  {
+    name: "breadcrumbs outside the page header",
+    allowed: ["components/page-header.tsx"],
+    check: (s) => (RENDERED_BREADCRUMBS.test(withoutComments(s)) ? `renders <Breadcrumbs>. ${BREADCRUMB_ADVICE}` : null),
+  },
+  {
     name: "react-markdown import",
     allowed: ["components/note-body.tsx"],
     check: (s) =>
       importSpecifiers(s).includes("react-markdown")
         ? "imports react-markdown. Use NoteBody from @/components/note-body, which renders markdown through the shared components."
+        : null,
+  },
+  {
+    name: "mermaid import",
+    allowed: ["components/diagram.tsx"],
+    check: (s) =>
+      importSpecifiers(s).some((spec) => spec === "mermaid" || spec.startsWith("mermaid/"))
+        ? "imports mermaid. Use Diagram from @/components/diagram, which loads mermaid on demand with the app's theme and strict security."
         : null,
   },
   {
@@ -246,6 +283,16 @@ const RULES: Rule[] = [
       /\bExternalLink(?:Icon)?\b/.test(withoutComments(s))
         ? "uses ExternalLinkIcon. Use TextLink with href from @/components/text-link, which adds the one external-link icon."
         : null,
+  },
+  {
+    name: "file URL outside the file actions",
+    allowed: ["lib/api.ts", "components/file-actions.tsx"],
+    check: (s) => {
+      const m = FILE_URL_CALL.exec(withoutComments(s));
+      return m
+        ? `calls ${m[1]}(). Use FileActions or FileLink from @/components/file-actions, which give a file View, Open, and Show in folder.`
+        : null;
+    },
   },
   {
     name: "raw table markup",
@@ -262,11 +309,33 @@ const RULES: Rule[] = [
     },
   },
   {
+    name: "hand-built show more button",
+    allowed: ["components/show-more.tsx"],
+    check: (s) => {
+      // Buttons do not nest, so each element runs from <Button to the next </Button.
+      for (const element of elements(withoutComments(s), "Button")) {
+        const words = MORE_WORDING.exec(element);
+        if (words) {
+          return `builds its own "${words[0]}" <Button>. Use ShowMore from @/components/show-more, the one button that grows a list in place.`;
+        }
+      }
+      return null;
+    },
+  },
+  {
     name: "raw page heading",
     allowed: ["components/page-header.tsx"],
     check: (s) =>
       RAW_H1.test(withoutComments(s))
         ? "renders an <h1>. Use PageHeader from @/components/page-header, which owns the one h1 on every page; use SectionHeading from @/components/section-heading for a section title."
+        : null,
+  },
+  {
+    name: "raw keycap",
+    allowed: ["components/kbd.tsx"],
+    check: (s) =>
+      RAW_KBD.test(withoutComments(s))
+        ? "renders a <kbd> element. Use Kbd or KbdGroup from @/components/kbd, the one keycap style."
         : null,
   },
   {
@@ -379,8 +448,14 @@ describe("architecture: one shared component per UI pattern", () => {
       "App.tsx",
       "main.tsx",
       "pages/files.tsx",
+      "components/breadcrumbs.tsx",
       "components/data-table.tsx",
+      "components/diagram.tsx",
+      "components/file-actions.tsx",
+      "components/kbd.tsx",
       "components/layout.tsx",
+      "components/show-more.tsx",
+      "lib/breadcrumb-items.ts",
       "lib/rehype-table-cell-text.ts",
     ]) {
       expect(paths).toContain(expected);
@@ -419,15 +494,85 @@ describe("architecture: one shared component per UI pattern", () => {
       expect(flag(`import { Alert } from "@/components/ui/alert";`, "components/notice.tsx")).toEqual([]);
     });
 
+    it("a shadcn breadcrumb import outside breadcrumbs.tsx", () => {
+      expect(flag(`import { Breadcrumb, BreadcrumbList } from "@/components/ui/breadcrumb";`)[0]).toMatch(
+        /ui\/breadcrumb.*PageHeader's breadcrumbs prop/,
+      );
+      expect(flag(`import { BreadcrumbItem } from "./ui/breadcrumb.tsx";`, "components/page-header.tsx")[0]).toMatch(
+        /ui\/breadcrumb/,
+      );
+      expect(flag(`import { Breadcrumb } from "@/components/ui/breadcrumb";`, "components/breadcrumbs.tsx")).toEqual([]);
+      // The shared component's module is not the primitive.
+      expect(flag(`import { Breadcrumbs } from "@/components/breadcrumbs";`, "components/page-header.tsx")).toEqual([]);
+    });
+
+    it("<Breadcrumbs> rendered outside page-header.tsx", () => {
+      expect(flag(`<Breadcrumbs items={[{ label: "Home", to: "/" }]} />`)[0]).toMatch(
+        /renders <Breadcrumbs>.*PageHeader's breadcrumbs prop/,
+      );
+      expect(flag(`return (\n  <div>\n    <Breadcrumbs\n      items={crumbs}\n    />\n  </div>\n);`, "components/item-card.tsx")[0]).toMatch(
+        /renders <Breadcrumbs>/,
+      );
+      expect(flag(`const nav = createElement(Breadcrumbs, { items });`)[0]).toMatch(/renders <Breadcrumbs>/);
+      expect(flag(`{breadcrumbs && <Breadcrumbs items={breadcrumbs} />}`, "components/page-header.tsx")).toEqual([]);
+      // Passing items to PageHeader, a comment, or a component with a longer name is fine.
+      expect(flag(`<PageHeader title="Tags" breadcrumbs={TOP_LEVEL_CRUMBS} />\n// <Breadcrumbs> lives in page-header.tsx`)).toEqual([]);
+      expect(flag(`<BreadcrumbsPreview />`)).toEqual([]);
+    });
+
     it("a react-markdown import outside note-body.tsx", () => {
       expect(flag(`import ReactMarkdown from "react-markdown";`)[0]).toMatch(/react-markdown.*NoteBody/);
       expect(flag(`import ReactMarkdown from "react-markdown";`, "components/note-body.tsx")).toEqual([]);
+    });
+
+    it("a mermaid import, static or dynamic, outside diagram.tsx", () => {
+      expect(flag(`import mermaid from "mermaid";`)[0]).toMatch(/imports mermaid.*Diagram/);
+      expect(flag(`const m = await import("mermaid");`, "components/note-body.tsx")[0]).toMatch(/imports mermaid/);
+      expect(flag(`import type { Mermaid } from "mermaid";`, "lib/diagram-theme.ts")[0]).toMatch(/imports mermaid/);
+      expect(flag(`import { x } from "mermaid/dist/mermaid.core.mjs";`)[0]).toMatch(/imports mermaid/);
+      expect(flag(`const m = import("mermaid").then((x) => x.default);`, "components/diagram.tsx")).toEqual([]);
+      // A module whose name only contains the word is fine.
+      expect(flag(`import { remarkMermaid } from "remark-mermaidjs";`)).toEqual([]);
     });
 
     it("ExternalLinkIcon outside text-link.tsx", () => {
       expect(flag(`import { ExternalLinkIcon } from "lucide-react";`)[0]).toMatch(/ExternalLinkIcon.*TextLink/);
       expect(flag(`import { ExternalLink } from "lucide-react";`)[0]).toMatch(/TextLink/);
       expect(flag(`import { ExternalLinkIcon } from "lucide-react";`, "components/text-link.tsx")).toEqual([]);
+    });
+
+    it("a file URL built outside lib/api.ts and file-actions.tsx", () => {
+      expect(flag(`cell: (f) => <TextLink href={fileUrl(f.path)}>Open</TextLink>,`)[0]).toMatch(
+        /calls fileUrl\(\).*FileActions or FileLink/,
+      );
+      expect(flag(`const href = localFileUrl(path);`, "components/search-results.tsx")[0]).toMatch(/calls localFileUrl\(\)/);
+      expect(flag(`<a href={viewUrlFor (p)}>View</a>`, "lib/anything.ts")[0]).toMatch(/calls viewUrlFor\(\)/);
+      expect(flag(`title: { text: t, href: api.fileUrl(p) }`)[0]).toMatch(/calls fileUrl\(\)/);
+      expect(flag(`export function fileUrl(relPath: string) {}`, "lib/api.ts")).toEqual([]);
+      expect(flag(`<TextLink href={viewUrlFor(path)}>View</TextLink>`, "components/file-actions.tsx")).toEqual([]);
+      // Importing a name, a comment, or a different function that ends the same way is fine.
+      expect(flag(`import { fileUrl } from "@/lib/api";\n// fileUrl(x) is for file-actions.tsx`)).toEqual([]);
+      expect(flag(`const u = profileUrl(user);`)).toEqual([]);
+    });
+
+    it("a hand-built Show more button outside show-more.tsx", () => {
+      expect(flag(`<Button variant="secondary" onClick={more}>Show more notes</Button>`)[0]).toMatch(
+        /builds its own "Show more" <Button>.*ShowMore from @\/components\/show-more/,
+      );
+      expect(
+        flag(
+          `return (\n  <Button\n    variant="outline"\n    disabled={loading}\n    onClick={() => load(offset + 50)}\n  >\n    <ChevronDownIcon />\n    Load more\n  </Button>\n);`,
+          "components/note-card.tsx",
+        )[0],
+      ).toMatch(/"Load more" <Button>/);
+      expect(flag(`<Button onClick={more}>{loading ? "Loading" : "Show more results"}</Button>`)[0]).toMatch(/Show more/);
+      expect(flag(`<Button size="icon" aria-label="See more tags" onClick={more} />`)[0]).toMatch(/"See more" <Button>/);
+      expect(flag(`<Button variant="secondary" onClick={onClick}>{label}</Button>`, "components/show-more.tsx")).toEqual([]);
+      // The shared component, other buttons, "more" text outside a button, and comments are fine.
+      expect(flag(`<ShowMore label="Show more notes" loading={notes.loading} onClick={more} />`)).toEqual([]);
+      expect(flag(`<Button variant="ghost" aria-expanded={open}>Show source</Button>`)).toEqual([]);
+      expect(flag(`<Button size="icon" aria-label="Open menu" />\n<p>Show more details below.</p>\n<Button>Go</Button>`)).toEqual([]);
+      expect(flag(`// <Button>Show more</Button> lives in show-more.tsx\n<Button>Search</Button>`)).toEqual([]);
     });
 
     it("raw table JSX, table roles, and created table elements outside data-table.tsx", () => {
@@ -450,6 +595,15 @@ describe("architecture: one shared component per UI pattern", () => {
       expect(flag(`const x = createElement("h1", null, "Title");`)[0]).toMatch(/PageHeader/);
       expect(flag(`const x = <h1 className="a">T</h1>;`, "components/page-header.tsx")).toEqual([]);
       expect(flag(`const x = <h2>Section</h2>;`)).toEqual([]);
+    });
+
+    it("a <kbd> element outside kbd.tsx", () => {
+      expect(flag(`const hint = <kbd className="rounded border px-1">Alt</kbd>;`)[0]).toMatch(/<kbd>.*Kbd or KbdGroup/);
+      expect(flag(`<span><kbd>K</kbd></span>`, "components/search-input.tsx")[0]).toMatch(/<kbd>/);
+      expect(flag(`const k = createElement("kbd", null, "K");`)[0]).toMatch(/<kbd>/);
+      expect(flag(`<kbd data-slot="kbd" className={KBD_CLASS}>{children}</kbd>`, "components/kbd.tsx")).toEqual([]);
+      // The shared component, and a comment naming the element, are fine.
+      expect(flag(`<KbdGroup keys={FOCUS_SEARCH.keys} />\n<Kbd>K</Kbd>\n// renders <kbd> through kbd.tsx`)).toEqual([]);
     });
 
     it("hover:underline outside text-link.tsx", () => {

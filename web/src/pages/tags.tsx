@@ -4,24 +4,11 @@ import { PageHeader } from "@/components/page-header";
 import { ErrorAlert, LoadingBlock } from "@/components/page-state";
 import { TextLink } from "@/components/text-link";
 import { api, tagUrl } from "@/lib/api";
-import type { Tag } from "@/lib/types";
+import { TOP_LEVEL_CRUMBS } from "@/lib/breadcrumb-items";
+import type { TagWithCount } from "@/lib/types";
 import { useAsync } from "@/lib/use-async";
 
-interface TagRow extends Tag {
-  count: number;
-}
-
-async function loadTags(): Promise<TagRow[]> {
-  const tags = await api.tags();
-  return Promise.all(
-    tags.map(async (t) => {
-      const notes = await api.listNotes({ tag: t.name });
-      return { ...t, count: notes.length };
-    }),
-  );
-}
-
-const columns: Column<TagRow>[] = [
+const columns: Column<TagWithCount>[] = [
   {
     id: "tag",
     header: "Tag",
@@ -42,11 +29,12 @@ const columns: Column<TagRow>[] = [
   { id: "count", header: "Notes", align: "end", cell: (t) => t.count },
 ];
 
+/** One request: GET /api/tags carries each tag's note count. */
 export function TagsPage() {
-  const { data, error, loading } = useAsync(loadTags, []);
+  const { data, error, loading } = useAsync(() => api.tags(), []);
   return (
     <>
-      <PageHeader title="Tags" />
+      <PageHeader title="Tags" breadcrumbs={TOP_LEVEL_CRUMBS} />
       {loading && <LoadingBlock lines={6} />}
       {error && <ErrorAlert error={error} />}
       {data && <DataTable columns={columns} rows={data} rowKey={(t) => t.name} caption="Tags" empty="No tags yet." />}

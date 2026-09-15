@@ -6,10 +6,12 @@ import { PageHeader } from "@/components/page-header";
 import { EmptyState, ErrorAlert } from "@/components/page-state";
 import { SearchInput } from "@/components/search-input";
 import { SearchResults } from "@/components/search-results";
+import { ShowMore, ShowMoreLimit, useFocusFirstNew } from "@/components/show-more";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { api } from "@/lib/api";
+import { TOP_LEVEL_CRUMBS } from "@/lib/breadcrumb-items";
 import type { NoteType, SearchMode } from "@/lib/types";
 import { useAsync } from "@/lib/use-async";
 
@@ -21,11 +23,23 @@ const MODES: Array<{ value: SearchMode; label: string; hint: string }> = [
 const TYPES: NoteType[] = ["note", "hub", "source"];
 const ANY = "__any__";
 
+/**
+ * Results per step and the most the server returns. "Show more results" re-runs the query with
+ * the limit raised by a step instead of fetching an offset, so the ranking stays the same.
+ * The limit lives in the URL as n (left out at the first step), so Back restores the longer list.
+ */
+const STEP = 20;
+const MAX_RESULTS = 100;
+
 function asMode(v: string | null): SearchMode {
   return v === "keyword" || v === "semantic" ? v : "hybrid";
 }
 function asType(v: string | null): NoteType | undefined {
   return TYPES.includes(v as NoteType) ? (v as NoteType) : undefined;
+}
+function asLimit(v: string | null): number {
+  const n = Number(v);
+  return Number.isInteger(n) ? Math.min(Math.max(n, STEP), MAX_RESULTS) : STEP;
 }
 
 export function SearchPage() {
@@ -34,6 +48,9 @@ export function SearchPage() {
   const mode = asMode(params.get("mode"));
   const tag = params.get("tag") ?? "";
   const type = asType(params.get("type"));
+  const limit = asLimit(params.get("n"));
+  // Names the search apart from its limit: a larger n for the same key keeps the shown rows.
+  const searchKey = JSON.stringify([q, mode, tag, type ?? ""]);
 
   // Draft form state; the URL is the source of truth once submitted.
   const [draftQ, setDraftQ] = useState(q);
@@ -49,10 +66,28 @@ export function SearchPage() {
 
   const tags = useAsync(() => api.tags(), []);
   const results = useAsync(
-    () => api.search(q, { limit: 50, mode, tag: tag || undefined, type }),
-    [q, mode, tag, type],
+    async () => ({ key: searchKey, limit, ...(await api.search(q, { limit, mode, tag: tag || undefined, type })) }),
+    [q, mode, tag, type, limit],
     q !== "",
   );
+  // The rows on screen: kept while a larger limit for the same search loads, dropped for a new search.
+  const shown = results.data?.key === searchKey ? results.data : undefined;
+  const { listRef, expectMore } = useFocusFirstNew(shown?.results.length ?? 0, searchKey);
+
+  const showMore = () => {
+    if (!shown) return;
+    expectMore();
+    const next = Math.min(shown.limit + STEP, MAX_RESULTS);
+    // The URL already asks for that limit when the last attempt failed: try it again.
+    if (next === limit) {
+      results.reload();
+      return;
+    }
+    const nextParams = new URLSearchParams(params);
+    nextParams.set("n", String(next));
+    // Replace, so Back leaves the search instead of shrinking the list a step at a time.
+    setParams(nextParams, { replace: true });
+  };
 
   const submit = (e?: FormEvent) => {
     e?.preventDefault();
@@ -67,7 +102,7 @@ export function SearchPage() {
 
   return (
     <>
-      <PageHeader title="Search" />
+      <PageHeader title="Search" breadcrumbs={TOP_LEVEL_CRUMBS} />
       <form onSubmit={submit} className="mb-8 space-y-4" role="search" aria-label="Search notes and files">
         <div className="flex gap-2">
           <SearchInput
@@ -76,6 +111,7 @@ export function SearchPage() {
             placeholder="What are you looking for?"
             label="Query"
             autoFocus
+            shortcutTarget="page"
           />
           <Button type="submit" size="lg">
             Search
@@ -132,9 +168,23 @@ export function SearchPage() {
       </form>
 
       {q === "" && <EmptyState>Type a query to search notes and files.</EmptyState>}
-      {q !== "" && results.loading && <LoadingCards count={4} />}
-      {q !== "" && results.error && <ErrorAlert error={results.error} />}
-      {q !== "" && results.data && !results.loading && <SearchResults results={results.data} query={q} />}
+      {q !== "" && !shown && results.loading && <LoadingCards count={4} />}
+      {shown && (
+        <div ref={listRef}>
+          <SearchResults results={shown.results} hasMore={shown.hasMore} query={q} />
+        </div>
+      )}
+      {shown?.hasMore && shown.limit < MAX_RESULTS && (
+        <ShowMore label="Show more results" loading={results.loading} onClick={showMore} />
+      )}
+      {shown?.hasMore && shown.limit >= MAX_RESULTS && (
+        <ShowMoreLimit>Showing the top {MAX_RESULTS}. Refine the search to narrow it.</ShowMoreLimit>
+      )}
+      {q !== "" && results.error && (
+        <div className={shown ? "mt-4" : undefined}>
+          <ErrorAlert error={results.error} />
+        </div>
+      )}
     </>
   );
 }

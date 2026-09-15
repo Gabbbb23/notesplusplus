@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { StatusBadge } from "@/components/badges";
+import { BreakableText } from "@/components/breakable-text";
 import { MetaRow } from "@/components/meta";
 import { TextLink } from "@/components/text-link";
 import { Card } from "@/components/ui/card";
@@ -14,24 +15,36 @@ import { cn } from "@/lib/utils";
 
 const SHELL_CLASS = "min-w-0 gap-0 rounded-lg p-4 shadow-none wrap-break-word";
 
-/** Where a card title points: an in-app route, or a file or site opened in a new tab. */
-export type ItemCardLink = { text: string; to: string } | { text: string; href: string };
+/**
+ * A card title and where it points: an in-app route (to), a site opened in a new tab (href), or
+ * nowhere, as plain text, when the card's details carry the actions (a file result's FileLink).
+ */
+export type ItemCardTitle =
+  | { text: string; to: string; href?: never }
+  | { text: string; href: string; to?: never }
+  | { text: string; to?: never; href?: never };
 
-function CardTitleLink({ link }: { link: ItemCardLink }) {
-  return "to" in link ? (
-    <TextLink to={link.to} variant="title">
-      {link.text}
-    </TextLink>
-  ) : (
-    <TextLink href={link.href} variant="title">
-      {link.text}
-    </TextLink>
-  );
+function CardTitle({ title }: { title: ItemCardTitle }) {
+  if (title.to !== undefined) {
+    return (
+      <TextLink to={title.to} variant="title">
+        {title.text}
+      </TextLink>
+    );
+  }
+  if (title.href !== undefined) {
+    return (
+      <TextLink href={title.href} variant="title">
+        {title.text}
+      </TextLink>
+    );
+  }
+  return <BreakableText className="text-base font-medium" text={title.text} />;
 }
 
 export interface ItemCardProps {
-  /** The linked title. */
-  title: ItemCardLink;
+  /** The title: linked, or plain text. */
+  title: ItemCardTitle;
   /** Shown after the title, usually a KindBadge. */
   badge?: ReactNode;
   /** One line of muted text under the title. */
@@ -47,7 +60,7 @@ export function ItemCard({ title, badge, summary, snippet, meta }: ItemCardProps
   return (
     <Card data-slot="item-card" className={cn(SHELL_CLASS, "gap-1.5 transition-colors hover:border-card-hover-border")}>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <CardTitleLink link={title} />
+        <CardTitle title={title} />
         {badge}
       </div>
       {summary && <div className="text-sm text-muted-foreground">{summary}</div>}

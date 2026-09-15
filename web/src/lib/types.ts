@@ -57,6 +57,22 @@ export interface Tag {
   description: string;
 }
 
+/** A tag as GET /api/tags returns it. */
+export interface TagWithCount extends Tag {
+  /** How many notes carry the tag. */
+  count: number;
+}
+
+/** One page of GET /api/notes, ordered by title. */
+export interface NoteListPage {
+  items: NoteSummary[];
+  /** Notes matching the filter across all pages. */
+  total: number;
+  /** The page size the server used: 100 by default, at most 500. */
+  limit: number;
+  offset: number;
+}
+
 export interface InboxItem {
   /** Filename inside inbox/, may include subfolders. */
   name: string;
@@ -81,6 +97,23 @@ export interface LinkReport {
   missingFiles: Array<{ from: string; file: string }>;
   missingSources: Array<{ from: string; source: string }>;
   invalidNotes: InvalidNote[];
+}
+
+/** One hub in a note's breadcrumb trail. */
+export interface TrailHub {
+  slug: string;
+  title: string;
+}
+
+/** Where a note sits under the root hub `index`. */
+export interface NoteTrail {
+  /**
+   * Hubs from `index` down to the hub that links directly to the note, root first. Never includes the note.
+   * The shortest chain of hub links wins; on a tie, the hub linked first wins. Empty for `index` itself.
+   */
+  trail: TrailHub[];
+  /** False when no chain of hubs from `index` reaches the note, or `index` does not exist. */
+  inHub: boolean;
 }
 
 /** Who performed a write. Goes in the git commit message as "<tool>: <action> <slug>". */
@@ -139,6 +172,13 @@ export interface SearchResult {
   score: number;
   tags: string[];
   type?: NoteType;
+}
+
+/** GET /api/search: the best `limit` results (1 to 100). */
+export interface SearchResponse {
+  results: SearchResult[];
+  /** True when more results exist past the limit. */
+  hasMore: boolean;
 }
 
 export interface IndexStats {

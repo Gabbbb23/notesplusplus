@@ -95,6 +95,117 @@ describe("<NoteBody> tables", () => {
   });
 });
 
+describe("<NoteBody> local file paths", () => {
+  const listPath = String.raw`C:\Important Files\College Files\College Junior Year\1st Sem\GE08 - Ethics\Module 1.pdf`;
+  // "# 1" would get a non-breaking space from the table cell step if the path were read after it.
+  const cellPath = String.raw`C:\Important Files\College Files\College Junior Year\1st Sem\GE08 - Ethics\Module # 1.pptx`;
+  const fencedPath = String.raw`C:\Important Files\Syllabus.pdf`;
+  const body = [
+    "Readings:",
+    "",
+    "- `" + listPath + "`",
+    "- Run `npm test` before class.",
+    "- See [`" + fencedPath + "`](https://example.com/syllabus).",
+    "",
+    "| Week | File |",
+    "|---|---|",
+    "| 1 | `" + cellPath + "` |",
+    "",
+    "```text",
+    fencedPath,
+    "```",
+  ].join("\n");
+
+  function renderBody() {
+    return render(
+      <MemoryRouter>
+        <NoteBody markdown={body} />
+      </MemoryRouter>,
+    );
+  }
+
+  it("gives a path in a list item the file actions, shown as code", () => {
+    renderBody();
+    const [pathItem, commandItem, linkItem] = screen.getAllByRole("listitem");
+
+    const code = pathItem!.querySelector("code")!;
+    expect(code.textContent).toBe(listPath);
+    expect(code).toHaveAttribute("data-slot", "breakable-text");
+    expect(within(pathItem!).getByRole("link", { name: "View Module 1.pdf in a new tab" })).toHaveAttribute(
+      "href",
+      `/api/local-file?path=${encodeURIComponent(listPath)}`,
+    );
+    expect(within(pathItem!).getByRole("button", { name: "Open Module 1.pdf in its default app" })).toBeInTheDocument();
+    expect(within(pathItem!).getByRole("button", { name: "Show Module 1.pdf in File Explorer" })).toBeInTheDocument();
+
+    // Code that is not a path, and a path inside a link, stay plain code.
+    expect(commandItem!.querySelector("code")!.textContent).toBe("npm test");
+    expect(within(commandItem!).queryByRole("button")).toBeNull();
+    expect(within(linkItem!).queryByRole("button")).toBeNull();
+    expect(within(linkItem!).getByRole("link").querySelector("code")!.textContent).toBe(fencedPath);
+  });
+
+  it("gives a path in a table cell the file actions and keeps the cell's table behaviour", () => {
+    renderBody();
+    const table = screen.getByRole("table");
+    const cell = within(table).getAllByRole("cell")[1]!;
+
+    expect(cell).toHaveAttribute("data-label", "File");
+    expect(cell).toHaveAttribute("data-size", "text");
+    expect(cell.querySelector("code")!.textContent).toBe(cellPath);
+    expect(within(cell).queryByRole("link")).toBeNull();
+    expect(within(cell).getByRole("button", { name: "Open Module # 1.pptx in its default app" })).toBeInTheDocument();
+    expect(within(cell).getByRole("button", { name: "Show Module # 1.pptx in File Explorer" })).toBeInTheDocument();
+    expect(cell.querySelector("[data-slot='file-actions']")).toHaveAttribute("data-size", "compact");
+    expect(table.innerHTML).not.toContain("overflow-x-auto");
+  });
+
+  it("leaves a path in a fenced code block alone", () => {
+    const { container } = renderBody();
+    const pre = container.querySelector("pre")!;
+    expect(pre.querySelector("code")!.className).toBe("language-text");
+    expect(pre.textContent).toBe(`${fencedPath}\n`);
+    expect(within(pre).queryByRole("button")).toBeNull();
+    expect(pre.querySelector("[data-slot='file-link']")).toBeNull();
+  });
+});
+
+describe("<NoteBody> callouts", () => {
+  it("renders each GitHub alert as a Notice with its tone and title, without the marker, and keeps plain blockquotes", () => {
+    const markers = ["NOTE", "TIP", "IMPORTANT", "WARNING", "CAUTION"];
+    const { container } = render(
+      <MemoryRouter>
+        <NoteBody
+          markdown={[...markers.map((m) => `> [!${m}]\n> About ${m.toLowerCase()}, see [[other-note]].`), "> Just a quote."].join("\n\n")}
+        />
+      </MemoryRouter>,
+    );
+
+    // Static notes, not alerts: a note's callouts are never announced when the page loads.
+    expect(screen.queryAllByRole("alert")).toHaveLength(0);
+    const notices = screen.getAllByRole("note");
+    expect(notices.map((n) => [n.getAttribute("data-tone"), n.querySelector("[data-slot='alert-title']")?.textContent])).toEqual([
+      ["info", "Note"],
+      ["success", "Tip"],
+      ["info", "Important"],
+      ["warning", "Warning"],
+      ["danger", "Caution"],
+    ]);
+    for (const [i, notice] of notices.entries()) {
+      expect(notice).toHaveTextContent(`About ${markers[i]!.toLowerCase()}, see other-note.`);
+      expect(notice.textContent).not.toContain("[!");
+      expect(within(notice).getByRole("link", { name: "other-note" })).toHaveAttribute("href", "/notes/other-note");
+    }
+    // Important shares the info tone but not Note's icon.
+    const icon = (n: HTMLElement) => n.querySelector("svg")?.getAttribute("class");
+    expect(icon(notices[2]!)).not.toBe(icon(notices[0]!));
+
+    const quotes = container.querySelectorAll("blockquote");
+    expect(quotes).toHaveLength(1);
+    expect(quotes[0]).toHaveTextContent("Just a quote.");
+  });
+});
+
 describe("<NoteBody> links and headings", () => {
   it("renders links through TextLink and h2 through SectionHeading", () => {
     render(

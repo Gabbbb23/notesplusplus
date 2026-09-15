@@ -35,12 +35,23 @@ export interface NoticeProps {
   children?: ReactNode;
   /** Replaces the tone's default icon. */
   icon?: LucideIcon;
+  /**
+   * Default true: role="alert", so screen readers announce it when it appears (errors, a missing
+   * root hub). false: role="note", a static box read in place, for content that is part of the page,
+   * such as a callout in a note body.
+   */
+  live?: boolean;
 }
 
-export function Notice({ tone = "info", title, children, icon }: NoticeProps) {
+export function Notice({ tone = "info", title, children, icon, live = true }: NoticeProps) {
   const Icon = icon ?? TONE_ICON[tone];
   return (
-    <Alert data-slot="notice" data-tone={tone} className={cn(SHELL_CLASS, TONE_CLASS[tone])}>
+    <Alert
+      data-slot="notice"
+      data-tone={tone}
+      role={live ? "alert" : "note"}
+      className={cn(SHELL_CLASS, TONE_CLASS[tone])}
+    >
       <Icon aria-hidden="true" />
       <AlertTitle>{title}</AlertTitle>
       {children && <AlertDescription>{children}</AlertDescription>}

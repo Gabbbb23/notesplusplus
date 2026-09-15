@@ -1,3 +1,5 @@
+import type { Element, ElementContent } from "hast";
+import { MessageSquareWarningIcon } from "lucide-react";
 import { Children, cloneElement, isValidElement, useMemo, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -10,9 +12,14 @@ import {
   TableRow,
   type CellAlign,
 } from "@/components/data-table";
+import { Diagram } from "@/components/diagram";
+import { FileLink } from "@/components/file-actions";
+import { Notice } from "@/components/notice";
 import { SectionHeading } from "@/components/section-heading";
 import { TextLink } from "@/components/text-link";
 import { isExternalHref, replaceWikilinks, safeHref } from "@/lib/markdown";
+import { CALLOUTS, isCalloutKind, rehypeCallouts } from "@/lib/rehype-callouts";
+import { rehypeLocalPaths } from "@/lib/rehype-local-paths";
 import { rehypeTableCellText } from "@/lib/rehype-table-cell-text";
 import { rehypeTableLabels } from "@/lib/rehype-table-labels";
 
@@ -28,6 +35,21 @@ function withPrimaryFirstCell(children: ReactNode): ReactNode {
   return Children.map(children, (child, i) =>
     i === 0 && isValidElement(child) ? cloneElement(child as ReactElement<{ primary?: boolean }>, { primary: true }) : child,
   );
+}
+
+function textOf(node: ElementContent): string {
+  if (node.type === "text") return node.value;
+  if (node.type === "element") return node.children.map(textOf).join("");
+  return "";
+}
+
+/** The source of a fenced ```mermaid block (a pre holding code.language-mermaid), or null. */
+function mermaidSource(pre: Element | undefined): string | null {
+  const code = pre?.children.find((child): child is Element => child.type === "element");
+  if (code?.tagName !== "code") return null;
+  const classes = code.properties.className;
+  if (!Array.isArray(classes) || !classes.includes("language-mermaid")) return null;
+  return textOf(code).replace(/\n$/, "");
 }
 
 interface MarkdownCellProps {
@@ -51,6 +73,32 @@ const components: Components = {
       <TextLink to={h} {...rest}>
         {children}
       </TextLink>
+    );
+  },
+  // Inline code holding an absolute Windows path (marked by rehype-local-paths.ts) becomes the
+  // path plus View, Open, and Show in folder. Other code, fenced blocks included, is unchanged.
+  code(props) {
+    const { children, node: _node, ...rest } = props;
+    const localPath = (props as { "data-local-path"?: string })["data-local-path"];
+    if (localPath) return <FileLink path={localPath} code />;
+    return <code {...rest}>{children}</code>;
+  },
+  // A fenced mermaid block becomes a figure; every other code block stays a code block.
+  pre({ node, children, ...rest }) {
+    const diagram = mermaidSource(node);
+    if (diagram !== null) return <Diagram source={diagram} />;
+    return <pre {...rest}>{children}</pre>;
+  },
+  // A GitHub alert (marked by rehype-callouts.ts) becomes a static Notice (role="note", never announced
+  // on load); other blockquotes stay as they are.
+  blockquote({ node: _node, children, ...rest }) {
+    const kind = (rest as { "data-callout"?: string })["data-callout"];
+    if (!isCalloutKind(kind)) return <blockquote {...rest}>{children}</blockquote>;
+    const { tone, title } = CALLOUTS[kind];
+    return (
+      <Notice tone={tone} title={title} icon={kind === "important" ? MessageSquareWarningIcon : undefined} live={false}>
+        {children}
+      </Notice>
     );
   },
   h2({ children, node: _node, className: _className, style: _style, ...rest }) {
@@ -93,13 +141,16 @@ const components: Components = {
 };
 
 const remarkPlugins = [remarkGfm];
-const rehypePlugins = [rehypeTableLabels, rehypeTableCellText];
+// rehypeLocalPaths reads code text before rehypeTableCellText rewrites the text in table cells.
+const rehypePlugins = [rehypeLocalPaths, rehypeTableLabels, rehypeTableCellText, rehypeCallouts];
 
 /**
  * A note body: markdown with GFM, wikilinks turned into router links,
  * raw HTML shown as text (react-markdown's default), unsafe hrefs dropped,
- * links through TextLink, h2 through SectionHeading, and tables through the shared
- * responsive table with the cell text step from rehype-table-cell-text.ts.
+ * links through TextLink, h2 through SectionHeading, inline code holding a local file path
+ * through FileLink, tables through the shared responsive table with the cell text step
+ * from rehype-table-cell-text.ts, fenced mermaid blocks through Diagram, and GitHub alert
+ * callouts through Notice.
  */
 export function NoteBody({ markdown }: { markdown: string }) {
   const source = useMemo(() => replaceWikilinks(markdown), [markdown]);

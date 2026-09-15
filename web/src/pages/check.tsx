@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/page-header";
 import { ErrorAlert, LoadingBlock } from "@/components/page-state";
 import { TextLink } from "@/components/text-link";
 import { api, noteUrl } from "@/lib/api";
+import { TOP_LEVEL_CRUMBS } from "@/lib/breadcrumb-items";
 import type { LinkReport } from "@/lib/types";
 import { useAsync } from "@/lib/use-async";
 
@@ -89,6 +90,7 @@ export function CheckPage() {
     <>
       <PageHeader
         title="Check"
+        breadcrumbs={TOP_LEVEL_CRUMBS}
         description={
           <>
             Problems the agent should fix. Run the <code className="font-mono">garden</code> prompt or fix by hand.

@@ -11,6 +11,7 @@ import {
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate, useSearchParams } from "react-router";
 import { SearchInput } from "@/components/search-input";
+import { SearchShortcutProvider } from "@/components/search-shortcut";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
@@ -97,7 +98,15 @@ function TopSearch({ className }: { className?: string }) {
 
   return (
     <form role="search" onSubmit={submit} className={className}>
-      <SearchInput name="q" value={q} onChange={setQ} placeholder="Search notes and files" label="Search" shape="pill" />
+      <SearchInput
+        name="q"
+        value={q}
+        onChange={setQ}
+        placeholder="Search notes and files"
+        label="Search"
+        shape="pill"
+        shortcutTarget="top-bar"
+      />
     </form>
   );
 }
@@ -105,46 +114,49 @@ function TopSearch({ className }: { className?: string }) {
 export function Layout() {
   const [open, setOpen] = useState(false);
   return (
-    <div className="min-h-screen md:flex">
-      {/* Sidebar, desktop */}
-      <aside className="hidden w-60 shrink-0 border-r bg-sidebar md:sticky md:top-0 md:flex md:h-screen md:flex-col">
-        <div className="flex h-16 items-center px-3">
-          <Brand />
-        </div>
-        <div className="px-3">
-          <NavLinks />
-        </div>
-        <div className="mt-auto px-5 py-4 text-xs text-muted-foreground">Read-only. The agent writes.</div>
-      </aside>
-
-      <div className="flex min-w-0 flex-1 flex-col">
-        {/* Top bar: search everywhere, plus the menu button under 768px */}
-        <header className="sticky top-0 z-10 flex h-16 items-center gap-3 border-b bg-background/95 px-4 backdrop-blur md:px-8">
-          <Sheet open={open} onOpenChange={setOpen}>
-            <SheetTrigger asChild>
-              <Button variant="ghost" size="icon" className="md:hidden" aria-label="Open menu">
-                <MenuIcon />
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="left" className="w-64 bg-sidebar p-3">
-              <SheetTitle className="sr-only">Navigation</SheetTitle>
-              <SheetDescription className="sr-only">Pages of the notes app</SheetDescription>
-              <div className="mb-4 flex h-10 items-center">
-                <Brand />
-              </div>
-              <NavLinks onNavigate={() => setOpen(false)} />
-            </SheetContent>
-          </Sheet>
-          <div className="md:hidden">
+    // Mounts the one Alt+K listener and the registry that the search fields join.
+    <SearchShortcutProvider>
+      <div className="min-h-screen md:flex">
+        {/* Sidebar, desktop */}
+        <aside className="hidden w-60 shrink-0 border-r bg-sidebar md:sticky md:top-0 md:flex md:h-screen md:flex-col">
+          <div className="flex h-16 items-center px-3">
             <Brand />
           </div>
-          <TopSearch className="ml-auto w-full max-w-md" />
-        </header>
+          <div className="px-3">
+            <NavLinks />
+          </div>
+          <div className="mt-auto px-5 py-4 text-xs text-muted-foreground">Read-only. The agent writes.</div>
+        </aside>
 
-        <main className="mx-auto w-full max-w-[52rem] flex-1 px-4 py-8 md:px-8">
-          <Outlet />
-        </main>
+        <div className="flex min-w-0 flex-1 flex-col">
+          {/* Top bar: search everywhere, plus the menu button under 768px */}
+          <header className="sticky top-0 z-10 flex h-16 items-center gap-3 border-b bg-background/95 px-4 backdrop-blur md:px-8">
+            <Sheet open={open} onOpenChange={setOpen}>
+              <SheetTrigger asChild>
+                <Button variant="ghost" size="icon" className="md:hidden" aria-label="Open menu">
+                  <MenuIcon />
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="left" className="w-64 bg-sidebar p-3">
+                <SheetTitle className="sr-only">Navigation</SheetTitle>
+                <SheetDescription className="sr-only">Pages of the notes app</SheetDescription>
+                <div className="mb-4 flex h-10 items-center">
+                  <Brand />
+                </div>
+                <NavLinks onNavigate={() => setOpen(false)} />
+              </SheetContent>
+            </Sheet>
+            <div className="md:hidden">
+              <Brand />
+            </div>
+            <TopSearch className="ml-auto w-full max-w-md" />
+          </header>
+
+          <main className="mx-auto w-full max-w-[52rem] flex-1 px-4 py-8 md:px-8">
+            <Outlet />
+          </main>
+        </div>
       </div>
-    </div>
+    </SearchShortcutProvider>
   );
 }

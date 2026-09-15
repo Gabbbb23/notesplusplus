@@ -176,6 +176,86 @@ describe("<DataTable layout='auto'> with ResizeObserver", () => {
     resize(599);
     expect(wrapper()).toHaveAttribute("data-layout", "stacked");
   });
+
+  it("lays stacked pairs out in a grid in a wide box and one per line in a narrow one", () => {
+    let wrapperWidth = 700;
+    const tableWidth = 900;
+    const observers: Array<() => void> = [];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(private cb: () => void) {
+          observers.push(() => this.cb());
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    stubProperty(HTMLElement.prototype, "clientWidth", function () {
+      return this.dataset.slot === "responsive-table" ? wrapperWidth : 0;
+    });
+    stubProperty(HTMLElement.prototype, "scrollWidth", function () {
+      return this.dataset.slot === "table" ? Math.max(tableWidth, wrapperWidth) : 0;
+    });
+    const rect = HTMLElement.prototype.getBoundingClientRect;
+    HTMLElement.prototype.getBoundingClientRect = function () {
+      return { ...rect.call(this), width: 128 } as DOMRect;
+    };
+    restore.push(() => {
+      HTMLElement.prototype.getBoundingClientRect = rect;
+    });
+
+    type Row = { subject: string; code: string; day: string; time: string; room: string; units: string; teacher: string };
+    const text = (id: keyof Row, header: string): Column<Row> => ({ id, header, cell: (r) => r[id] });
+    const seven: Column<Row>[] = [
+      text("subject", "Subject"),
+      text("code", "Code"),
+      text("day", "Day"),
+      text("time", "Time"),
+      text("room", "Room"),
+      text("units", "Units"),
+      text("teacher", "Teacher"),
+    ];
+    const { container } = render(
+      <DataTable
+        columns={seven}
+        rows={[{ subject: "ITE410 Capstone Project 1", code: "149413", day: "Monday", time: "4:30-9:30 PM", room: "", units: "3", teacher: "TBA" }]}
+        rowKey={(r) => r.code}
+      />,
+    );
+    const wrapper = () => container.querySelector("[data-slot='responsive-table']")!;
+    const resize = (w: number) =>
+      act(() => {
+        wrapperWidth = w;
+        observers.forEach((notify) => notify());
+      });
+
+    // 900px of table in a 700px box: stacked, and 700px is at least 36rem, so a grid.
+    expect(wrapper()).toHaveAttribute("data-layout", "stacked");
+    expect(wrapper()).toHaveAttribute("data-stack", "grid");
+
+    const table = screen.getByRole("table");
+    const row = within(table).getAllByRole("row")[1]!;
+    expect(row.className).toContain("group-data-[stack=grid]/table:grid-cols-[repeat(auto-fill,minmax(12rem,1fr))]");
+    expect(row.className).toContain("group-data-[stack=list]/table:flex-col");
+    const cells = within(row).getAllByRole("cell");
+    // The title spans the grid; labelled pairs put the label above the value; the empty Room cell stays hidden.
+    expect(cells[0]).toHaveAttribute("data-primary");
+    expect(cells[0]!.className).toContain("group-data-[stack=grid]/table:col-span-full");
+    expect(cells[1]).toHaveAttribute("data-label", "Code");
+    expect(cells[1]!.className).toContain("group-data-[stack=grid]/table:before:block");
+    expect(cells[4]).toHaveAttribute("data-empty");
+    expect(cells[4]!.className).toContain("group-data-[layout=stacked]/table:hidden");
+    expect(cells[4]!.className).not.toMatch(/stack=(?:list|grid)\]\/table:(?:grid|block|flex)(?:\s|$)/);
+
+    resize(500);
+    expect(wrapper()).toHaveAttribute("data-layout", "stacked");
+    expect(wrapper()).toHaveAttribute("data-stack", "list");
+
+    resize(1000);
+    expect(wrapper()).toHaveAttribute("data-layout", "table");
+    expect(wrapper()).not.toHaveAttribute("data-stack");
+  });
 });
 
 describe("empty cells", () => {

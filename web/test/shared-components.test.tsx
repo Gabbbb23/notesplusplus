@@ -3,6 +3,7 @@ import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 import { TagBadge, TagBadges, TagName } from "../src/components/badges";
 import { Callout } from "../src/components/callout";
+import { Kbd, KbdGroup } from "../src/components/kbd";
 import { MetaItem, MetaList, MetaRow } from "../src/components/meta";
 import { Notice } from "../src/components/notice";
 import { ErrorAlert, NotFoundState } from "../src/components/page-state";
@@ -45,6 +46,27 @@ describe("<TextLink>", () => {
     );
     expect(screen.getByRole("link", { name: "a" })).toHaveClass("font-medium");
     expect(screen.getByRole("link", { name: "b" })).toHaveClass("font-medium", "text-base");
+  });
+
+  it("muted is quiet: grey until hover, a 24px hit area, and a solid focus ring", () => {
+    inRouter(
+      <TextLink to="/" variant="muted">
+        Home
+      </TextLink>,
+    );
+    const link = screen.getByRole("link", { name: "Home" });
+    expect(link).toHaveClass(
+      "text-muted-foreground",
+      "hover:text-foreground",
+      "hover:underline",
+      "min-h-6",
+      "py-0.5",
+      "focus-visible:outline-2",
+      "focus-visible:outline-offset-2",
+      "focus-visible:outline-ring",
+    );
+    expect(link).not.toHaveClass("text-primary");
+    expect(link).not.toHaveClass("hover:text-primary-hover");
   });
 });
 
@@ -116,11 +138,53 @@ describe("<Notice>", () => {
     }
   });
 
-  it("ErrorAlert is a danger Notice", () => {
+  it("ErrorAlert is a danger Notice that is still announced (role alert)", () => {
     render(<ErrorAlert error={new ApiError("boom", 500, "internal")} />);
     const alert = screen.getByRole("alert");
     expect(alert).toHaveAttribute("data-tone", "danger");
     expect(alert.textContent).toContain("boom");
+    expect(screen.queryByRole("note")).toBeNull();
+  });
+
+  it("live={false} makes a static note that is not announced", () => {
+    render(
+      <Notice tone="warning" title="Warning" live={false}>
+        The syllabus lists the wrong room.
+      </Notice>,
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+    const note = screen.getByRole("note");
+    expect(note).toHaveAttribute("data-slot", "notice");
+    expect(note).toHaveAttribute("data-tone", "warning");
+    expect(note).toHaveTextContent("The syllabus lists the wrong room.");
+  });
+});
+
+describe("<Kbd> and <KbdGroup>", () => {
+  it("draws each key as a keycap in the app font, 20px tall, muted, on the card surface", () => {
+    render(<Kbd>Alt</Kbd>);
+    const cap = screen.getByText("Alt");
+    expect(cap.tagName).toBe("KBD");
+    expect(cap).toHaveClass(
+      "font-sans",
+      "text-xs",
+      "font-medium",
+      "text-muted-foreground",
+      "h-5",
+      "px-1.5",
+      "border",
+      "border-border",
+      "rounded-sm",
+      "bg-card",
+    );
+    expect(cap.className).not.toMatch(/uppercase|shadow|font-mono|animate|transition/);
+  });
+
+  it("KbdGroup sets the keys 4px apart, written as given", () => {
+    const { container } = render(<KbdGroup keys={["Alt", "K"]} />);
+    const group = container.querySelector("[data-slot='kbd-group']")!;
+    expect(group).toHaveClass("gap-1");
+    expect(Array.from(group.querySelectorAll("kbd"), (k) => k.textContent)).toEqual(["Alt", "K"]);
   });
 });
 
