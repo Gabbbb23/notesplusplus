@@ -312,6 +312,7 @@ describe("Tags page", () => {
       ["#college", "BSIT degree", "93"],
       ["#hardware", "Laptops and parts", "4"],
     ]);
-    expect(urls(fetchMock)).toEqual(["/api/tags"]);
+    // The layout loads the pins once for every page; the Tags page itself asks for the tags alone.
+    expect(urls(fetchMock).filter((u) => u !== "/api/pins")).toEqual(["/api/tags"]);
   });
 });

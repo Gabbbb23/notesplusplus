@@ -75,7 +75,7 @@ const ROUTES: Record<string, Route> = {
   "/api/notes?tag=college&limit=50&offset=0": () => reply(200, { items: [], total: 0, limit: 50, offset: 0 }),
   "/api/files": () => reply(200, []),
   "/api/inbox": () => reply(200, []),
-  "/api/check-links": () => reply(200, { brokenLinks: [], missingFiles: [], missingSources: [], invalidNotes: [], notesWithoutHub: [], notesInSeveralHubs: [] }),
+  "/api/check-links": () => reply(200, { brokenLinks: [], missingFiles: [], missingSources: [], invalidNotes: [], notesWithoutHub: [], notesInSeveralHubs: [], missingPins: [] }),
 };
 
 beforeEach(() => {

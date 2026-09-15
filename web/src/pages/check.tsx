@@ -41,11 +41,13 @@ function Report({ r }: { r: LinkReport }) {
     r.missingSources.length +
     r.invalidNotes.length +
     r.notesWithoutHub.length +
-    r.notesInSeveralHubs.length;
+    r.notesInSeveralHubs.length +
+    r.missingPins.length;
   if (total === 0) {
     return (
       <Notice tone="success" title="All clear">
-        No broken links, missing files, missing sources, or invalid notes, and every note is in exactly one hub.
+        No broken links, missing files, missing sources, invalid notes, or pins to missing notes, and every note is in
+        exactly one hub.
       </Notice>
     );
   }
@@ -104,6 +106,13 @@ function Report({ r }: { r: LinkReport }) {
                 <TextLink to={noteUrl(hub)}>{hub}</TextLink>
               </span>
             ))}
+          </li>
+        ))}
+      </Section>
+      <Section title="Pins to missing notes" count={r.missingPins.length}>
+        {r.missingPins.map((slug) => (
+          <li key={slug}>
+            <BreakableText as="code" className="font-mono" text={slug} />
           </li>
         ))}
       </Section>

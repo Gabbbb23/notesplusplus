@@ -2,16 +2,15 @@ import { AppWindowIcon, FolderOpenIcon, type LucideIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { BreakableText } from "@/components/breakable-text";
-import { TextLink } from "@/components/text-link";
 import { Button } from "@/components/ui/button";
-import { api, ApiError, viewUrlFor } from "@/lib/api";
-import { fileNameOf, isBrowserViewable, isFolderPath, isOpenable } from "@/lib/file-kinds";
+import { api, ApiError } from "@/lib/api";
+import { fileNameOf, isFolderPath, isOpenable } from "@/lib/file-kinds";
 import { cn } from "@/lib/utils";
 
 /*
- * Every control that acts on a file a note mentions: View in a browser tab, Open in its default
- * Windows app, and Show in folder in File Explorer. Apart from lib/api.ts, this is the only
- * module that builds a file URL, so every page offers the same actions the same way.
+ * Every control that acts on a file a note mentions: Open in its default Windows app, and Show in
+ * folder in File Explorer. Every page offers the same two actions the same way; no page shows a
+ * file in a browser tab (DECISIONS.md, 2026-09-15, "File buttons are Open and Show in folder only").
  */
 
 export type FileActionsSize = "default" | "compact";
@@ -73,9 +72,8 @@ export interface FileActionsProps {
 }
 
 /**
- * View (a new tab, only for types a browser shows), Open (only for openable types and folders),
- * and Show in folder (always). Each button is disabled while its request runs and reports the
- * result in a toast.
+ * Open (only for openable types and folders) and Show in folder (always). Each button is disabled
+ * while its request runs and reports the result in a toast.
  */
 export function FileActions({ path, name, size = "default" }: FileActionsProps) {
   const label = name ?? fileNameOf(path);
@@ -109,13 +107,6 @@ export function FileActions({ path, name, size = "default" }: FileActionsProps) 
       data-size={size}
       className={cn("inline-flex shrink-0 items-center whitespace-nowrap align-middle", compact ? "gap-1" : "gap-2")}
     >
-      {isBrowserViewable(path) && (
-        <span className={cn(compact && "mr-0.5")}>
-          <TextLink href={viewUrlFor(path)} aria-label={`View ${label} in a new tab`}>
-            View
-          </TextLink>
-        </span>
-      )}
       {isOpenable(path) && (
         <ActionButton
           icon={AppWindowIcon}

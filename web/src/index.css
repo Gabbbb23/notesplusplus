@@ -292,3 +292,80 @@
 .prose-note input[type="checkbox"] {
   margin-right: 0.4rem;
 }
+
+/*
+ * The print page (/print/notes/:slug, pages/print-note.tsx), on screen and on paper. The server's
+ * headless Edge renders it 1024px wide, then prints A4 with 16mm side margins, 178mm of text width.
+ * The sheet is that wide on screen too, so tables and gantt charts measure the width they print at.
+ * White, Roboto at 11pt on a 1.45 line, and no shadows: cards and figures are hairline borders.
+ */
+.print-page {
+  min-height: 100vh;
+  background: var(--card);
+  color: var(--foreground);
+  font-size: 11pt;
+  line-height: 1.45;
+  padding-inline: 1rem;
+}
+.print-sheet {
+  width: 178mm;
+  max-width: 100%;
+  margin-inline: auto;
+  padding-block: 2.5rem;
+}
+.print-page .prose-note {
+  line-height: 1.45;
+}
+.print-page *,
+.print-page *::before,
+.print-page *::after {
+  box-shadow: none !important;
+}
+.print-page figure,
+.print-page [data-slot="responsive-table"] {
+  background: transparent;
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 18mm 16mm 20mm;
+  }
+  html,
+  body {
+    background: var(--card);
+  }
+  *,
+  *::before,
+  *::after {
+    box-shadow: none !important;
+  }
+  .print-page {
+    min-height: 0;
+    padding-inline: 0;
+  }
+  .print-sheet {
+    padding-block: 0;
+  }
+  /* Keep a row, a figure, a callout, or a code block on one page, and a heading with what follows it. */
+  tr,
+  figure,
+  [data-slot="diagram"],
+  [data-slot="notice"],
+  [data-slot="callout"],
+  .prose-note pre {
+    break-inside: avoid;
+  }
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    break-after: avoid;
+  }
+  /* A tall diagram shrinks to fit on one page. Its width already never exceeds the text column. */
+  [data-slot="diagram-svg"] svg {
+    max-height: 230mm;
+  }
+}

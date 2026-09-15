@@ -34,6 +34,18 @@ export interface NoteSummary {
   updated: IsoDate;
 }
 
+/** What the web UI needs to name a note and link to it: its menu, a pinned card, a sidebar link. */
+export type NoteRef = Pick<NoteSummary, "slug" | "title" | "type">;
+
+/** The two places a note can be pinned. */
+export type PinTarget = "home" | "sidebar";
+
+/** GET /api/pins, and the answer to every pin change: the pinned notes of each target in pin order. */
+export interface PinnedNotes {
+  home: NoteSummary[];
+  sidebar: NoteSummary[];
+}
+
 export interface Note extends NoteSummary {
   frontmatter: Frontmatter;
   /** Markdown body without the frontmatter block. */
@@ -106,6 +118,8 @@ export interface LinkReport {
   notesWithoutHub: Array<{ slug: string }>;
   /** Notes of type note that two or more hubs link to, sorted by slug, with those hubs. */
   notesInSeveralHubs: Array<{ slug: string; hubs: string[] }>;
+  /** Slugs pins.yml lists whose note no longer exists or does not parse. They stay pinned but show nowhere. */
+  missingPins: string[];
 }
 
 /** One hub in a note's breadcrumb trail. */

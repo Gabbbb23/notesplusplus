@@ -16,6 +16,7 @@ const EMPTY: LinkReport = {
   invalidNotes: [],
   notesWithoutHub: [],
   notesInSeveralHubs: [],
+  missingPins: [],
 };
 
 function renderWith(report: LinkReport) {
@@ -71,5 +72,33 @@ describe("Check page hub membership", () => {
   it("counts hub membership against All clear", async () => {
     renderWith(EMPTY);
     expect(await screen.findByRole("alert")).toHaveTextContent("every note is in exactly one hub");
+  });
+});
+
+describe("Check page pins", () => {
+  it("lists pins to missing notes, one row per slug, as code without links", async () => {
+    renderWith({ ...EMPTY, missingPins: ["deleted-note", "renamed-by-hand"] });
+
+    const pins = await section("Pins to missing notes");
+    expect(within(pins).getByRole("heading", { level: 2 })).toHaveTextContent("Pins to missing notes2");
+    const rows = within(pins).getAllByRole("listitem");
+    expect(rows.map((r) => r.textContent)).toEqual(["deleted-note", "renamed-by-hand"]);
+    expect(rows[0]!.querySelector("code")).toHaveAttribute("data-slot", "breakable-text");
+    // The notes are gone, so there is nothing to link to.
+    expect(within(pins).queryByRole("link")).toBeNull();
+    expect(screen.queryByText("All clear")).toBeNull();
+  });
+
+  it("a missing pin alone withholds All clear and shows every section", async () => {
+    renderWith({ ...EMPTY, missingPins: ["deleted-note"] });
+    expect(within(await section("Pins to missing notes")).getByText("deleted-note")).toBeInTheDocument();
+    expect(within(await section("Broken links")).getByText("None.")).toBeInTheDocument();
+    expect(screen.queryByText("All clear")).toBeNull();
+  });
+
+  it("says pins to missing notes are covered when all is clear", async () => {
+    renderWith(EMPTY);
+    expect(await screen.findByRole("alert")).toHaveTextContent("pins to missing notes");
+    expect(screen.queryByRole("heading", { name: /Pins to missing notes/ })).toBeNull();
   });
 });

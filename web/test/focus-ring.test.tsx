@@ -7,6 +7,17 @@ import { Breadcrumbs } from "../src/components/breadcrumbs";
 import { TextLink } from "../src/components/text-link";
 import { BreadcrumbLink } from "../src/components/ui/breadcrumb";
 import { Button } from "../src/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "../src/components/ui/dropdown-menu";
 import { Input } from "../src/components/ui/input";
 import { Select, SelectTrigger, SelectValue } from "../src/components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "../src/components/ui/sheet";
@@ -166,6 +177,28 @@ describe("every interactive primitive has the focus ring", () => {
       expectFocusRing(link);
       expect(link).toHaveClass("rounded-sm");
     }
+  });
+
+  it("DropdownMenu items: plain, checkbox, radio, and submenu triggers", async () => {
+    render(
+      <DropdownMenu open>
+        <DropdownMenuTrigger>More</DropdownMenuTrigger>
+        <DropdownMenuContent>
+          <DropdownMenuCheckboxItem checked>Pin to Home</DropdownMenuCheckboxItem>
+          <DropdownMenuItem>Move up</DropdownMenuItem>
+          <DropdownMenuRadioGroup value="a">
+            <DropdownMenuRadioItem value="a">A</DropdownMenuRadioItem>
+          </DropdownMenuRadioGroup>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>Export as</DropdownMenuSubTrigger>
+          </DropdownMenuSub>
+        </DropdownMenuContent>
+      </DropdownMenu>,
+    );
+    const menu = await screen.findByRole("menu");
+    const items = Array.from(menu.querySelectorAll<HTMLElement>("[role^='menuitem']"));
+    expect(items).toHaveLength(4);
+    for (const item of items) expectFocusRing(item);
   });
 
   it("tag pills (Badge links)", () => {

@@ -9,10 +9,10 @@ import { describe, expect, it } from "vitest";
  * decisions (DECISIONS.md, 2026-09-14). Every .ts and .tsx file under src, except the shadcn
  * primitives in components/ui, composes the shared components in src/components. Nothing
  * reaches past them to a primitive, hand-builds a table, heading, link, alert, or keycap, places
- * breadcrumbs anywhere but PageHeader, builds a file URL instead of using FileActions, builds its
- * own "Show more" button instead of using ShowMore, writes document.title outside lib/page-title.ts,
- * scrolls sideways, restyles a primitive's colours, or hard-codes a colour. src/index.css may only
- * scroll code blocks sideways.
+ * breadcrumbs anywhere but PageHeader, serves a file in a browser tab instead of using FileActions,
+ * makes an object-URL download outside lib/export-note.ts, builds its own "Show more" button instead
+ * of using ShowMore, writes document.title outside lib/page-title.ts, scrolls sideways, restyles a
+ * primitive's colours, or hard-codes a colour. src/index.css may only scroll code blocks sideways.
  *
  * Each rule has fixtures below proving it flags the pattern, so a rule that silently stops
  * matching fails the suite instead of passing it.
@@ -210,7 +210,14 @@ const RAW_H1 = /<h1(?=[\s>/])|\b(?:createElement|jsxs?|jsxDEV)\s*\(\s*["'`]h1["'
 const RAW_KBD = /<kbd(?=[\s>/])|\b(?:createElement|jsxs?|jsxDEV)\s*\(\s*["'`]kbd["'`]/;
 const SCROLL_CLASS = /(?<![\w-])overflow-(?:x-)?(?:auto|scroll)(?![\w-])/;
 const SCROLL_STYLE = /\boverflowX\b|\boverflow\s*:\s*["'`](?:auto|scroll)["'`]|\boverflow(?:-x)?\s*:\s*(?:auto|scroll)\b/;
+/** A call to one of the removed helpers that built a URL serving a file, should one come back. */
 const FILE_URL_CALL = /\b(fileUrl|localFileUrl|viewUrlFor)\s*\(/;
+/** A URL the server answers with a file's bytes: a brain file or a file outside the brain. */
+const FILE_SERVING_URL = /\/api\/(?:files\/|local-file\b)/;
+const FILE_ADVICE =
+  "Files open in their default app or in File Explorer, never in a browser tab: use FileActions or FileLink from @/components/file-actions.";
+/** Making an object URL: a download built in code. */
+const OBJECT_URL = /\bcreateObjectURL\b/;
 /** An assignment to document.title (also through window or globalThis), not a comparison. */
 const TITLE_WRITE = /\b(?:(?:window|globalThis)\s*\.\s*)?document\s*\.\s*title\s*(?:[+]?=)(?!=)|\bReflect\.set\(\s*document\s*,\s*["'`]title["'`]/;
 const RENDERED_BREADCRUMBS = /<Breadcrumbs(?![\w.$])|\b(?:createElement|jsxs?|jsxDEV)\s*\(\s*Breadcrumbs\b/;
@@ -253,6 +260,14 @@ const RULES: Rule[] = [
         : null,
   },
   {
+    name: "shadcn dropdown-menu import",
+    allowed: ["components/note-actions-menu.tsx"],
+    check: (s) =>
+      importsUi(s, "dropdown-menu")
+        ? "imports @/components/ui/dropdown-menu. Use NoteActionsMenu from @/components/note-actions-menu, the one three-dot menu."
+        : null,
+  },
+  {
     name: "shadcn breadcrumb import",
     allowed: ["components/breadcrumbs.tsx"],
     check: (s) => (importsUi(s, "breadcrumb") ? `imports @/components/ui/breadcrumb. ${BREADCRUMB_ADVICE}` : null),
@@ -287,14 +302,22 @@ const RULES: Rule[] = [
         : null,
   },
   {
-    name: "file URL outside the file actions",
-    allowed: ["lib/api.ts", "components/file-actions.tsx"],
+    name: "a URL that serves a file",
+    allowed: [],
     check: (s) => {
-      const m = FILE_URL_CALL.exec(withoutComments(s));
-      return m
-        ? `calls ${m[1]}(). Use FileActions or FileLink from @/components/file-actions, which give a file View, Open, and Show in folder.`
-        : null;
+      const call = FILE_URL_CALL.exec(withoutComments(s));
+      if (call) return `calls ${call[1]}(). ${FILE_ADVICE}`;
+      const url = findInLiterals(s, FILE_SERVING_URL);
+      return url ? `builds a URL that serves a file (${url[0]}). ${FILE_ADVICE}` : null;
     },
+  },
+  {
+    name: "object-URL download outside lib/export-note.ts",
+    allowed: ["lib/export-note.ts"],
+    check: (s) =>
+      OBJECT_URL.test(withoutComments(s))
+        ? "makes an object URL (URL.createObjectURL). Use exportPdf or exportMarkdown from @/lib/export-note, the one module that starts a download."
+        : null,
   },
   {
     name: "document.title outside lib/page-title.ts",
@@ -464,8 +487,11 @@ describe("architecture: one shared component per UI pattern", () => {
       "components/file-actions.tsx",
       "components/kbd.tsx",
       "components/layout.tsx",
+      "components/note-actions-menu.tsx",
+      "components/pins.tsx",
       "components/show-more.tsx",
       "lib/breadcrumb-items.ts",
+      "lib/export-note.ts",
       "lib/page-title.ts",
       "lib/rehype-table-cell-text.ts",
     ]) {
@@ -503,6 +529,20 @@ describe("architecture: one shared component per UI pattern", () => {
       expect(flag(`import { Badge } from "@/components/ui/badge";`, "components/badges.tsx")).toEqual([]);
       expect(flag(`import { Card } from "@/components/ui/card";`, "components/item-card.tsx")).toEqual([]);
       expect(flag(`import { Alert } from "@/components/ui/alert";`, "components/notice.tsx")).toEqual([]);
+    });
+
+    it("a shadcn dropdown-menu import outside note-actions-menu.tsx", () => {
+      expect(flag(`import { DropdownMenu, DropdownMenuItem } from "@/components/ui/dropdown-menu";`)[0]).toMatch(
+        /ui\/dropdown-menu.*NoteActionsMenu/,
+      );
+      expect(flag(`import { DropdownMenuTrigger } from "./ui/dropdown-menu.tsx";`, "components/layout.tsx")[0]).toMatch(
+        /ui\/dropdown-menu/,
+      );
+      expect(flag(`import { DropdownMenu } from "../components/ui/dropdown-menu";`, "lib/anything.ts")[0]).toMatch(/NoteActionsMenu/);
+      expect(flag(`import { DropdownMenu } from "@/components/ui/dropdown-menu";`, "components/note-actions-menu.tsx")).toEqual([]);
+      // The shared menu, and a module whose name only starts the same way, are fine.
+      expect(flag(`import { NoteActionsMenu } from "@/components/note-actions-menu";`)).toEqual([]);
+      expect(flag(`import { Menu } from "@/components/ui/dropdown-menu-extra";`)).toEqual([]);
     });
 
     it("a shadcn breadcrumb import outside breadcrumbs.tsx", () => {
@@ -552,18 +592,32 @@ describe("architecture: one shared component per UI pattern", () => {
       expect(flag(`import { ExternalLinkIcon } from "lucide-react";`, "components/text-link.tsx")).toEqual([]);
     });
 
-    it("a file URL built outside lib/api.ts and file-actions.tsx", () => {
-      expect(flag(`cell: (f) => <TextLink href={fileUrl(f.path)}>Open</TextLink>,`)[0]).toMatch(
-        /calls fileUrl\(\).*FileActions or FileLink/,
+    it("a URL that serves a file, anywhere", () => {
+      expect(flag("<TextLink href={`/api/files/${path}`}>View</TextLink>")[0]).toMatch(
+        /serves a file \(\/api\/files\/\).*FileActions or FileLink/,
       );
-      expect(flag(`const href = localFileUrl(path);`, "components/search-results.tsx")[0]).toMatch(/calls localFileUrl\(\)/);
-      expect(flag(`<a href={viewUrlFor (p)}>View</a>`, "lib/anything.ts")[0]).toMatch(/calls viewUrlFor\(\)/);
-      expect(flag(`title: { text: t, href: api.fileUrl(p) }`)[0]).toMatch(/calls fileUrl\(\)/);
-      expect(flag(`export function fileUrl(relPath: string) {}`, "lib/api.ts")).toEqual([]);
-      expect(flag(`<TextLink href={viewUrlFor(path)}>View</TextLink>`, "components/file-actions.tsx")).toEqual([]);
-      // Importing a name, a comment, or a different function that ends the same way is fine.
-      expect(flag(`import { fileUrl } from "@/lib/api";\n// fileUrl(x) is for file-actions.tsx`)).toEqual([]);
-      expect(flag(`const u = profileUrl(user);`)).toEqual([]);
+      expect(flag(`const href = "/api/local-file?path=" + encodeURIComponent(p);`, "components/file-actions.tsx")[0]).toMatch(
+        /serves a file \(\/api\/local-file\)/,
+      );
+      expect(flag(`export const u = (p: string) => "/api/files/" + p;`, "lib/api.ts")[0]).toMatch(/serves a file/);
+      expect(flag(`cell: (f) => <TextLink href={fileUrl(f.path)}>Open</TextLink>,`)[0]).toMatch(/calls fileUrl\(\).*FileActions/);
+      expect(flag(`<a href={viewUrlFor (p)}>View</a>`, "components/file-actions.tsx")[0]).toMatch(/calls viewUrlFor\(\)/);
+      expect(flag(`const href = api.localFileUrl(path);`, "lib/anything.ts")[0]).toMatch(/calls localFileUrl\(\)/);
+      // The file list, the open request, a comment, and a function that ends the same way are fine.
+      expect(flag(`return request<FileEntry[]>("/api/files");`, "lib/api.ts")).toEqual([]);
+      expect(flag(`return postJson("/api/open", { path });`, "lib/api.ts")).toEqual([]);
+      expect(flag(`// "/api/files/a.pdf" is served for the server's own use\nconst u = profileUrl(user);`)).toEqual([]);
+    });
+
+    it("an object-URL download outside lib/export-note.ts", () => {
+      expect(flag(`const url = URL.createObjectURL(blob);`)[0]).toMatch(/object URL.*exportPdf or exportMarkdown/);
+      expect(flag(`const href = window.URL.createObjectURL(await res.blob());`, "components/note-actions-menu.tsx")[0]).toMatch(
+        /object URL/,
+      );
+      expect(flag(`const { createObjectURL } = URL;\nlink.href = createObjectURL(blob);`, "lib/api.ts")[0]).toMatch(/object URL/);
+      expect(flag(`const url = URL.createObjectURL(blob);`, "lib/export-note.ts")).toEqual([]);
+      // Revoking, and a comment naming it, are fine.
+      expect(flag(`URL.revokeObjectURL(url);\n// URL.createObjectURL lives in lib/export-note.ts`)).toEqual([]);
     });
 
     it("a hand-built Show more button outside show-more.tsx", () => {

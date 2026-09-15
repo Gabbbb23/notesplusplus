@@ -5,6 +5,7 @@ import { Callout } from "@/components/callout";
 import { FileLink } from "@/components/file-actions";
 import { LoadingCards } from "@/components/item-card";
 import { MetaItem, MetaList } from "@/components/meta";
+import { NoteActionsMenu } from "@/components/note-actions-menu";
 import { NoteBody, SourceBody } from "@/components/note-body";
 import { NoteList } from "@/components/note-card";
 import { PageHeader } from "@/components/page-header";
@@ -45,7 +46,12 @@ export function NotePage() {
 
   return (
     <article>
-      <PageHeader title={n.title} badge={<KindBadge kind={n.type} />} breadcrumbs={breadcrumbs}>
+      <PageHeader
+        title={n.title}
+        badge={<KindBadge kind={n.type} />}
+        breadcrumbs={breadcrumbs}
+        actions={<NoteActionsMenu note={n} />}
+      >
         {n.summary && <Callout>{n.summary}</Callout>}
         <MetaList>
           {n.tags.length > 0 && (

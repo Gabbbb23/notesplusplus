@@ -31,33 +31,26 @@ afterEach(() => {
 });
 
 describe("<FileActions> controls", () => {
-  it("gives a PDF outside the brain View, Open, and Show in folder, each named after the file", () => {
-    render(<FileActions path={MODULE} />);
-
-    const view = screen.getByRole("link", { name: "View Module 1.pdf in a new tab" });
-    expect(view).toHaveAttribute("href", `/api/local-file?path=${encodeURIComponent(MODULE)}`);
-    expect(view).toHaveAttribute("target", "_blank");
-    expect(view).toHaveAttribute("rel", "noopener noreferrer");
+  it("gives a PDF outside the brain Open and Show in folder, each named after the file, and no View", () => {
+    const { container } = render(<FileActions path={MODULE} />);
 
     const open = screen.getByRole("button", { name: "Open Module 1.pdf in its default app" });
     expect(open).toHaveTextContent("Open");
     const show = screen.getByRole("button", { name: "Show Module 1.pdf in File Explorer" });
     expect(show).toHaveTextContent("Show in folder");
-  });
-
-  it("views a brain file through /api/files", () => {
-    render(<FileActions path="files/college/4th-year/Course Syllabus.pdf" />);
-    expect(screen.getByRole("link", { name: "View Course Syllabus.pdf in a new tab" })).toHaveAttribute(
-      "href",
-      "/api/files/college/4th-year/Course%20Syllabus.pdf",
-    );
-  });
-
-  it("offers View only for types a browser shows", () => {
-    render(<FileActions path="files/fields/Budget.xlsx" />);
+    // The owner found View redundant next to Open (DECISIONS.md, 2026-09-15).
     expect(screen.queryByRole("link")).toBeNull();
-    expect(screen.getByRole("button", { name: "Open Budget.xlsx in its default app" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Show Budget.xlsx in File Explorer" })).toBeInTheDocument();
+    expect(container).not.toHaveTextContent("View");
+    expect(screen.getAllByRole("button")).toEqual([open, show]);
+  });
+
+  it("gives a brain file, an image, and an Office file the same two buttons", () => {
+    for (const path of ["files/college/4th-year/Course Syllabus.pdf", String.raw`C:\Photos\IMG_0001.JPG`, "files/fields/Budget.xlsx"]) {
+      const { unmount } = render(<FileActions path={path} />);
+      expect(screen.queryByRole("link"), path).toBeNull();
+      expect(screen.getAllByRole("button").map((b) => b.textContent), path).toEqual(["Open", "Show in folder"]);
+      unmount();
+    }
   });
 
   it("never offers Open for a program, but still offers Show in folder", () => {
@@ -91,7 +84,8 @@ describe("<FileActions> controls", () => {
       "title",
       "Show in File Explorer",
     );
-    expect(screen.getByRole("link", { name: "View Module 1.pdf in a new tab" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button")).toHaveLength(2);
+    expect(screen.queryByRole("link")).toBeNull();
   });
 });
 
@@ -180,9 +174,8 @@ describe("<FileLink>", () => {
     const text = container.querySelector("[data-slot='breakable-text']")!;
     expect(text.tagName).toBe("CODE");
     expect(text.textContent).toBe("Syllabus");
-    expect(screen.getByRole("link", { name: "View Syllabus in a new tab" })).toHaveAttribute(
-      "href",
-      "/api/files/college/Syllabus.pdf",
-    );
+    expect(screen.getByRole("button", { name: "Open Syllabus in its default app" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show Syllabus in File Explorer" })).toBeInTheDocument();
+    expect(screen.queryByRole("link")).toBeNull();
   });
 });

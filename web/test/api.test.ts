@@ -1,28 +1,42 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { api, ApiError, fileUrl, localFileUrl, viewUrlFor } from "../src/lib/api";
+import { api, ApiError, noteExportUrl, printNoteUrl } from "../src/lib/api";
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("file URLs", () => {
-  it("encodes each segment of a brain path", () => {
-    expect(fileUrl("files/sub dir/a#1.pdf")).toBe("/api/files/sub%20dir/a%231.pdf");
+describe("export and print URLs", () => {
+  it("encode the slug", () => {
+    expect(noteExportUrl("rizal day", "md")).toBe("/api/notes/rizal%20day/export.md");
+    expect(noteExportUrl("rizal-day", "pdf")).toBe("/api/notes/rizal-day/export.pdf");
+    expect(printNoteUrl("rizal-day")).toBe("/print/notes/rizal-day");
+    expect(printNoteUrl("rizal-day", { autoprint: true })).toBe("/print/notes/rizal-day?autoprint=1");
   });
+});
 
-  it("puts an absolute path, fully encoded, in the local-file query", () => {
-    const path = String.raw`C:\Important Files\GE08 - Ethics\Module 1 & 2+.pdf`;
-    const url = localFileUrl(path);
-    expect(url).toBe(`/api/local-file?path=${encodeURIComponent(path)}`);
-    expect(url).not.toContain("+.pdf");
-    expect(new URL(url, "http://localhost").searchParams.get("path")).toBe(path);
-  });
+describe("api pins", () => {
+  it("put JSON as the web tool and return the lists", async () => {
+    const lists = { home: [], sidebar: [] };
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => lists,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
 
-  it("viewUrlFor sends absolute paths to local-file and brain paths to files", () => {
-    expect(viewUrlFor("C:/Videos/Lecture 1.mp4")).toBe(`/api/local-file?path=${encodeURIComponent("C:/Videos/Lecture 1.mp4")}`);
-    expect(viewUrlFor("files/college/a b.pdf")).toBe("/api/files/college/a%20b.pdf");
-    // A UNC path is not a local path for this feature, so it never reaches local-file.
-    expect(viewUrlFor(String.raw`\\server\share\a.pdf`)).not.toContain("local-file");
+    await expect(api.setPin("home", "rizal-day", true)).resolves.toEqual(lists);
+    await api.orderPins("sidebar", ["b", "a"]);
+
+    expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method, init?.body])).toEqual([
+      ["/api/pins/home", "PUT", JSON.stringify({ slug: "rizal-day", pinned: true })],
+      ["/api/pins/sidebar/order", "PUT", JSON.stringify({ slugs: ["b", "a"] })],
+    ]);
+    for (const [, init] of fetchMock.mock.calls) {
+      const headers = new Headers(init?.headers);
+      expect(headers.get("Content-Type")).toBe("application/json");
+      expect(headers.get("X-Brain-Tool")).toBe("web");
+    }
   });
 });
 

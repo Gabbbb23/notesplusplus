@@ -53,15 +53,28 @@ export interface ItemCardProps {
   snippet?: ReactNode;
   /** The bottom row of small muted details: tags, dates, paths. */
   meta?: ReactNode;
+  /**
+   * Controls at the right end of the title row, outside the title link, such as NoteActionsMenu.
+   * The title wraps beside them; they stay in the top right corner.
+   */
+  actions?: ReactNode;
 }
 
 /** One thing in a list: a note, a search result, a backlink. */
-export function ItemCard({ title, badge, summary, snippet, meta }: ItemCardProps) {
+export function ItemCard({ title, badge, summary, snippet, meta, actions }: ItemCardProps) {
   return (
     <Card data-slot="item-card" className={cn(SHELL_CLASS, "gap-1.5 transition-colors hover:border-card-hover-border")}>
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <CardTitle title={title} />
-        {badge}
+      <div className="flex items-start gap-2">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+          <CardTitle title={title} />
+          {badge}
+        </div>
+        {/* A 32px button on a 24px title line: the negative margins keep the card's height and tuck it into the corner. */}
+        {actions && (
+          <div data-slot="item-card-actions" className="-my-1 -mr-2 flex shrink-0 items-center gap-1">
+            {actions}
+          </div>
+        )}
       </div>
       {summary && <div className="text-sm text-muted-foreground">{summary}</div>}
       {snippet && <div className="text-sm leading-relaxed">{snippet}</div>}

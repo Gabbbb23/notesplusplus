@@ -1,10 +1,14 @@
 import { TagBadges } from "@/components/badges";
-import { StatCard } from "@/components/item-card";
+import { CardList, StatCard } from "@/components/item-card";
 import { MetaRow } from "@/components/meta";
+import { NoteActionsMenu, usePinnedListFocus } from "@/components/note-actions-menu";
 import { NoteBody } from "@/components/note-body";
+import { NoteCard } from "@/components/note-card";
 import { Notice } from "@/components/notice";
 import { PageHeader } from "@/components/page-header";
 import { ErrorAlert, LoadingBlock } from "@/components/page-state";
+import { usePins } from "@/components/pins";
+import { SectionHeading } from "@/components/section-heading";
 import { TextLink } from "@/components/text-link";
 import { api, ApiError, noteUrl, type Stats } from "@/lib/api";
 import { useAsync, type AsyncState } from "@/lib/use-async";
@@ -24,8 +28,36 @@ function StatsStrip({ stats }: { stats: AsyncState<Stats> }) {
 }
 
 /**
+ * The notes pinned to Home as compact cards in pin order, each with its menu's Move up and Move
+ * down. Nothing at all while there are none.
+ */
+function PinnedNotes() {
+  const notes = usePins().lists.home;
+  const { listRef, rowRemoved } = usePinnedListFocus<HTMLDivElement>(notes.length);
+  if (notes.length === 0) return null;
+  return (
+    <section aria-labelledby="pinned-heading" className="mb-8 space-y-4">
+      <SectionHeading id="pinned-heading">Pinned</SectionHeading>
+      <div ref={listRef}>
+        <CardList>
+          {notes.map((note, index) => (
+            <NoteCard
+              key={note.slug}
+              compact
+              note={note}
+              actions={<NoteActionsMenu note={note} pinnedList="home" onRemovedFromList={() => rowRemoved(index)} />}
+            />
+          ))}
+        </CardList>
+      </div>
+    </section>
+  );
+}
+
+/**
  * The header comes first, as on every other page, and shows even when the hub fails to load:
- * the root hub's title and summary once loaded, "Home" until then or without one.
+ * the root hub's title and summary once loaded, "Home" until then or without one. The pinned
+ * notes follow it, above the stats and the hub's content.
  */
 export function HomePage() {
   const hub = useAsync(() => api.getNote("index"), []);
@@ -47,6 +79,7 @@ export function HomePage() {
           </MetaRow>
         )}
       </PageHeader>
+      <PinnedNotes />
       <StatsStrip stats={stats} />
       {hub.loading && <LoadingBlock lines={8} />}
       {missing && (

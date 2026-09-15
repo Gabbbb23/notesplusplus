@@ -199,7 +199,7 @@ describe("other pages", () => {
       "/api/files": () => reply(200, []),
       "/api/inbox": () => reply(200, []),
       "/api/check-links": () =>
-        reply(200, { brokenLinks: [], missingFiles: [], missingSources: [], invalidNotes: [], notesWithoutHub: [], notesInSeveralHubs: [] }),
+        reply(200, { brokenLinks: [], missingFiles: [], missingSources: [], invalidNotes: [], notesWithoutHub: [], notesInSeveralHubs: [], missingPins: [] }),
     });
     renderAt(path);
 

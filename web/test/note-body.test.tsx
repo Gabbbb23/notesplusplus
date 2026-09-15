@@ -168,12 +168,12 @@ describe("<NoteBody> local file paths", () => {
     const code = pathItem!.querySelector("code")!;
     expect(code.textContent).toBe(listPath);
     expect(code).toHaveAttribute("data-slot", "breakable-text");
-    expect(within(pathItem!).getByRole("link", { name: "View Module 1.pdf in a new tab" })).toHaveAttribute(
-      "href",
-      `/api/local-file?path=${encodeURIComponent(listPath)}`,
-    );
-    expect(within(pathItem!).getByRole("button", { name: "Open Module 1.pdf in its default app" })).toBeInTheDocument();
-    expect(within(pathItem!).getByRole("button", { name: "Show Module 1.pdf in File Explorer" })).toBeInTheDocument();
+    expect(within(pathItem!).getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual([
+      "Open Module 1.pdf in its default app",
+      "Show Module 1.pdf in File Explorer",
+    ]);
+    // No View link: files open in their default app or in File Explorer, never in a browser tab.
+    expect(within(pathItem!).queryByRole("link")).toBeNull();
 
     // Code that is not a path, and a path inside a link, stay plain code.
     expect(commandItem!.querySelector("code")!.textContent).toBe("npm test");

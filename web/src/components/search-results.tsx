@@ -2,6 +2,7 @@ import { KindBadge, TagBadges, type Kind } from "@/components/badges";
 import { BreakableText } from "@/components/breakable-text";
 import { FileLink } from "@/components/file-actions";
 import { CardList, ItemCard } from "@/components/item-card";
+import { NoteActionsMenu } from "@/components/note-actions-menu";
 import { EmptyState } from "@/components/page-state";
 import { Snippet } from "@/components/snippet";
 import { noteUrl } from "@/lib/api";
@@ -12,12 +13,18 @@ function kindOf(r: SearchResult): Kind {
   return r.kind === "note" ? (r.type ?? "note") : "file";
 }
 
-/** A note result links to the note. A file result shows its path with View, Open, and Show in folder. */
+/**
+ * A note result links to the note and has its NoteActionsMenu. A file result shows its path with
+ * Open and Show in folder.
+ */
 export function SearchResultCard({ result }: { result: SearchResult }) {
   const isNote = result.kind === "note";
   return (
     <ItemCard
       title={isNote ? { text: result.title, to: noteUrl(result.id) } : { text: result.title }}
+      actions={
+        isNote ? <NoteActionsMenu note={{ slug: result.id, title: result.title, type: result.type ?? "note" }} /> : undefined
+      }
       badge={<KindBadge kind={kindOf(result)} />}
       summary={result.summary || undefined}
       snippet={result.snippet ? <Snippet snippet={result.snippet} /> : undefined}

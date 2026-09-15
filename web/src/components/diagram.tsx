@@ -3,6 +3,7 @@ import type { Mermaid } from "mermaid";
 import { useEffect, useId, useRef, useState } from "react";
 import { Notice } from "@/components/notice";
 import { LoadingBlock } from "@/components/page-state";
+import { useRenderPending } from "@/components/render-tracker";
 import { Button } from "@/components/ui/button";
 import { diagramThemeCss, diagramThemeVariables, readDiagramTokens } from "@/lib/diagram-theme";
 
@@ -84,8 +85,11 @@ function SourceBlock({ id, source, hidden }: { id?: string; source: string; hidd
  * A fenced mermaid block drawn as a figure: the SVG scaled to the content width, then a quiet
  * "Show source" toggle that reveals the text. While mermaid loads, grey bars hold the space. When
  * the diagram cannot be drawn, a warning Notice gives the parser's first error line and the source.
+ *
+ * `print` leaves out the toggle, for the print page. Inside a RenderTrackerProvider the diagram
+ * counts as drawing until it is drawn or has failed.
  */
-export function Diagram({ source }: { source: string }) {
+export function Diagram({ source, print = false }: { source: string; print?: boolean }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const sourceId = useId();
   const [drawn, setDrawn] = useState<DrawState | null>(null);
@@ -106,6 +110,7 @@ export function Diagram({ source }: { source: string }) {
 
   // A result for an older source never shows.
   const state = drawn?.source === source ? drawn : null;
+  useRenderPending(state === null);
 
   return (
     <div ref={boxRef} data-slot="diagram" data-state={state?.status ?? "loading"} className="min-w-0">
@@ -126,20 +131,22 @@ export function Diagram({ source }: { source: string }) {
           ) : (
             <LoadingBlock lines={3} />
           )}
-          <div className="mt-3 flex flex-col items-start gap-2">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              aria-expanded={showSource}
-              aria-controls={sourceId}
-              onClick={() => setShowSource((open) => !open)}
-            >
-              <CodeIcon aria-hidden="true" />
-              {showSource ? "Hide source" : "Show source"}
-            </Button>
-            <SourceBlock id={sourceId} source={source} hidden={!showSource} />
-          </div>
+          {!print && (
+            <div className="mt-3 flex flex-col items-start gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                aria-expanded={showSource}
+                aria-controls={sourceId}
+                onClick={() => setShowSource((open) => !open)}
+              >
+                <CodeIcon aria-hidden="true" />
+                {showSource ? "Hide source" : "Show source"}
+              </Button>
+              <SourceBlock id={sourceId} source={source} hidden={!showSource} />
+            </div>
+          )}
         </figure>
       )}
     </div>

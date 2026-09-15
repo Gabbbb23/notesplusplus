@@ -23,7 +23,7 @@ const columns: Column<FileEntry>[] = [
     id: "actions",
     header: "Actions",
     hideHeader: true,
-    // End-aligned so Open and Show in folder line up in every row, with or without View.
+    // End-aligned so Show in folder lines up in every row, and Open beside it wherever the type can be opened.
     align: "end",
     cell: (f) => <FileActions path={f.path} size="compact" />,
   },

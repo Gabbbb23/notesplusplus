@@ -1,6 +1,18 @@
 import type { Element, ElementContent } from "hast";
 import { MessageSquareWarningIcon } from "lucide-react";
-import { Children, cloneElement, isValidElement, useMemo, type CSSProperties, type ReactElement, type ReactNode } from "react";
+import {
+  Children,
+  cloneElement,
+  isValidElement,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentProps,
+  type CSSProperties,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import ReactMarkdown, { type Components, type Options } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -12,9 +24,11 @@ import {
   TableRow,
   type CellAlign,
 } from "@/components/data-table";
+import { BreakableText } from "@/components/breakable-text";
 import { Diagram } from "@/components/diagram";
 import { FileLink } from "@/components/file-actions";
 import { Notice } from "@/components/notice";
+import { useRenderPending } from "@/components/render-tracker";
 import { SectionHeading } from "@/components/section-heading";
 import { TextLink } from "@/components/text-link";
 import { isExternalHref, safeHref } from "@/lib/markdown";
@@ -141,6 +155,52 @@ const components: Components = {
   },
 };
 
+/** An image on the print page: loaded at once rather than lazily, and counted as drawing until it loads or fails. */
+function PrintImage(props: ComponentProps<"img">) {
+  const ref = useRef<HTMLImageElement>(null);
+  const [settled, setSettled] = useState(false);
+  useRenderPending(!settled);
+  // An image the browser already had can finish before React listens for its load event.
+  useLayoutEffect(() => {
+    if (ref.current?.complete) setSettled(true);
+  }, []);
+  return <img ref={ref} {...props} loading="eager" onLoad={() => setSettled(true)} onError={() => setSettled(true)} />;
+}
+
+/**
+ * The print page's differences: nothing points back into the app (a wikilink or any in-app link is
+ * its text), a mentioned path is code without file buttons, diagrams have no source toggle, and
+ * images load at once. Links to sites stay links.
+ */
+const printComponents: Components = {
+  ...components,
+  a({ href, children, node: _node, className: _className, style: _style, target: _target, rel: _rel, ...rest }) {
+    const h = safeHref(href);
+    if (!h || !isExternalHref(h)) return <>{children}</>;
+    return (
+      <TextLink href={h} {...rest}>
+        {children}
+      </TextLink>
+    );
+  },
+  code(props) {
+    const { children, node: _node, ...rest } = props;
+    const localPath = (props as { "data-local-path"?: string })["data-local-path"];
+    if (localPath) return <BreakableText as="code" className="font-mono" text={localPath} />;
+    return <code {...rest}>{children}</code>;
+  },
+  pre({ node, children, ...rest }) {
+    const diagram = mermaidSource(node);
+    if (diagram !== null) return <Diagram source={diagram} print />;
+    return <pre {...rest}>{children}</pre>;
+  },
+  img({ src, alt, node: _node, loading: _loading, ...rest }) {
+    const h = safeHref(typeof src === "string" ? src : undefined);
+    if (!h) return <span>{alt}</span>;
+    return <PrintImage src={h} alt={alt ?? ""} {...rest} />;
+  },
+};
+
 // remarkWikilinks runs on the tree remark-gfm builds, so a table's cells are split before it looks for links.
 const remarkPlugins = [remarkGfm, remarkWikilinks];
 
@@ -154,8 +214,20 @@ const remarkPlugins = [remarkGfm, remarkWikilinks];
  *
  * `mentions` comes from the server's note (`Note.mentions`); pass `[]` for markdown that is not a
  * note body. Only those spans get file actions, because only those paths will open.
+ *
+ * `print` is for the print page: wikilinks and other in-app links read as plain text, mentioned
+ * paths are code without buttons, and diagrams have no "Show source" toggle. Callouts, tables, and
+ * diagrams render as usual.
  */
-export function NoteBody({ markdown, mentions }: { markdown: string; mentions: readonly string[] }) {
+export function NoteBody({
+  markdown,
+  mentions,
+  print = false,
+}: {
+  markdown: string;
+  mentions: readonly string[];
+  print?: boolean;
+}) {
   // rehypeLocalPaths reads code text before rehypeTableCellText rewrites the text in table cells.
   const rehypePlugins = useMemo<Options["rehypePlugins"]>(
     () => [[rehypeLocalPaths, { mentions }], rehypeTableLabels, rehypeTableCellText, rehypeCallouts],
@@ -163,7 +235,7 @@ export function NoteBody({ markdown, mentions }: { markdown: string; mentions: r
   );
   return (
     <div className="prose-note">
-      <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components}>
+      <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={print ? printComponents : components}>
         {markdown}
       </ReactMarkdown>
     </div>
@@ -173,7 +245,10 @@ export function NoteBody({ markdown, mentions }: { markdown: string; mentions: r
 /** A source note: raw material shown verbatim in monospace, wrapped. */
 export function SourceBody({ text }: { text: string }) {
   return (
-    <pre className="whitespace-pre-wrap break-words rounded-lg border bg-muted p-4 font-mono text-[0.85rem] leading-relaxed">
+    <pre
+      data-slot="source-body"
+      className="whitespace-pre-wrap break-words rounded-lg border bg-muted p-4 font-mono text-[0.85rem] leading-relaxed"
+    >
       {text}
     </pre>
   );

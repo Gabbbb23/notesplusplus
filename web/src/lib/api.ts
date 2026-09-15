@@ -2,7 +2,6 @@
  * The one typed client over the REST API (docs/rest-api.md).
  * Every page goes through these functions; nothing else calls fetch.
  */
-import { isLocalAbsolutePath } from "./file-kinds";
 import type {
   FileEntry,
   InboxItem,
@@ -12,6 +11,8 @@ import type {
   NoteSummary,
   NoteTrail,
   NoteType,
+  PinnedNotes,
+  PinTarget,
   SearchMode,
   SearchResponse,
   TagWithCount,
@@ -44,7 +45,8 @@ export class NetworkError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+/** A successful response, or the ApiError its error envelope describes. */
+async function send(path: string, init?: RequestInit): Promise<Response> {
   let res: Response;
   try {
     res = await fetch(path, init);
@@ -63,6 +65,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new ApiError(message, res.status, code);
   }
+  return res;
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await send(path, init);
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
@@ -77,25 +84,19 @@ function query(params: Record<string, string | number | boolean | undefined>): s
   return s ? `?${s}` : "";
 }
 
-/** URL for a brain-relative file path, e.g. "files/a b.pdf" -> "/api/files/a%20b.pdf". */
-export function fileUrl(relPath: string): string {
-  return "/api/" + relPath.split("/").map(encodeURIComponent).join("/");
-}
-
-/** URL that serves a file outside the brain, e.g. "C:\a b.pdf" -> "/api/local-file?path=C%3A%5Ca%20b.pdf". */
-export function localFileUrl(absPath: string): string {
-  return `/api/local-file?path=${encodeURIComponent(absPath)}`;
-}
-
-/** Where View opens a file: an absolute Windows path goes through localFileUrl, a brain path through fileUrl. */
-export function viewUrlFor(path: string): string {
-  return isLocalAbsolutePath(path) ? localFileUrl(path) : fileUrl(path);
-}
-
 function postJson<T>(path: string, body: unknown): Promise<T> {
   return request<T>(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** A write the web UI makes to the brain: JSON, sent as the web tool so the commit names it. */
+function putJson<T>(path: string, body: unknown): Promise<T> {
+  return request<T>(path, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", "X-Brain-Tool": "web" },
     body: JSON.stringify(body),
   });
 }
@@ -106,6 +107,16 @@ export function noteUrl(slug: string): string {
 
 export function tagUrl(tag: string): string {
   return `/tags/${encodeURIComponent(tag)}`;
+}
+
+/** The server's download of a note: "md" is the file as stored, "pdf" the print page printed to A4. */
+export function noteExportUrl(slug: string, format: "md" | "pdf"): string {
+  return `/api/notes/${encodeURIComponent(slug)}/export.${format}`;
+}
+
+/** The print page for a note. autoprint opens the browser's print dialog once the page is ready. */
+export function printNoteUrl(slug: string, { autoprint = false }: { autoprint?: boolean } = {}): string {
+  return `/print/notes/${encodeURIComponent(slug)}${autoprint ? "?autoprint=1" : ""}`;
 }
 
 export const api = {
@@ -127,6 +138,12 @@ export const api = {
     return request<NoteTrail>(`/api/notes/${encodeURIComponent(slug)}/trail`);
   },
 
+  /** A note printed to PDF by the server, and the Content-Disposition header that names the file. */
+  async exportPdf(slug: string): Promise<{ blob: Blob; contentDisposition: string | null }> {
+    const res = await send(noteExportUrl(slug, "pdf"));
+    return { blob: await res.blob(), contentDisposition: res.headers.get("Content-Disposition") };
+  },
+
   /** The best `limit` results (1 to 100), and whether more exist past them. */
   search(
     q: string,
@@ -138,6 +155,21 @@ export const api = {
   /** Every tag with the number of notes carrying it. */
   tags(): Promise<TagWithCount[]> {
     return request<TagWithCount[]>("/api/tags");
+  },
+
+  /** Every pinned note, per target, in pin order. */
+  pins(): Promise<PinnedNotes> {
+    return request<PinnedNotes>("/api/pins");
+  },
+
+  /** Pin a note to the end of a target's list (a pinned note keeps its place), or unpin it. Returns every pin after. */
+  setPin(target: PinTarget, slug: string, pinned: boolean): Promise<PinnedNotes> {
+    return putJson<PinnedNotes>(`/api/pins/${target}`, { slug, pinned });
+  },
+
+  /** Put a target's pins in a new order: the same slugs, rearranged. Returns every pin after. */
+  orderPins(target: PinTarget, slugs: string[]): Promise<PinnedNotes> {
+    return putJson<PinnedNotes>(`/api/pins/${target}/order`, { slugs });
   },
 
   inbox(): Promise<InboxItem[]> {
