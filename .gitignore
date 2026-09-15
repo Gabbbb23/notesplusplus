@@ -4,3 +4,5 @@ dist/
 *.log
 .cache/
 coverage/
+web/node_modules/
+web/dist/

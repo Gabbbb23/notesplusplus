@@ -62,7 +62,7 @@ export interface RecordedWrite {
 }
 
 /**
- * In-memory Brain for API and web tests. Holds notes, tags, inbox items, and file
+ * In-memory Brain for API tests. Holds notes, tags, inbox items, and file
  * entries in Maps. `root` is a real folder so /api/files/* can stream from disk.
  */
 export class FakeBrain implements Brain {

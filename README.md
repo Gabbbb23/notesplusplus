@@ -8,6 +8,7 @@ A personal second brain that an AI agent reads and writes. See `INTENT.md` for p
 cp .env.example .env      # set BRAIN_PATH and PORT
 npm install
 npm run init-brain        # creates the brain repo layout if missing
+npm run build:web         # builds the web UI into web/dist (installs web/ deps first: npm --prefix web install)
 npm start                 # REST API + web UI on http://localhost:3777
 ```
 
@@ -15,7 +16,7 @@ The MCP server for Claude Code and Codex runs as a separate stdio process (`npm 
 
 ## Architecture
 
-One Node process serves everything. TypeScript, run with `tsx`, no build step.
+One Node process serves everything. TypeScript, run with `tsx`. The web UI in `web/` is a React single-page app built with Vite (`npm run build:web`) and served as static files from `web/dist`.
 
 ```
 src/
@@ -26,16 +27,20 @@ src/
     index/           SearchIndex: SQLite (node:sqlite) with FTS5, local embeddings, links table, file text extraction
     brain.ts         Brain facade composing store + index
   api/               Hono REST routes over Brain. JSON in, JSON out.
-  web/               Server-rendered HTML pages over Brain. Read-only plus inbox drop box.
   mcp/               MCP stdio server. Thin HTTP client of the REST API. Serves conventions + prompts.
   cli/               init-brain, reindex
-  server.ts          entry: api + web
+  server.ts          entry: api + static web UI from web/dist (SPA fallback for non-/api routes)
   mcp.ts             entry: mcp stdio
 conventions/
   conventions.md     how the store is organized. Served by MCP as a resource and by REST at /api/conventions.
   file.md            the "file this material" skill, served as an MCP prompt.
   garden.md          the "tidy the store" skill, served as an MCP prompt.
 test/                vitest
+web/                 React + Vite + Tailwind + shadcn UI. Own package.json; read-only pages plus the inbox drop box.
+  src/lib/api.ts     typed client over docs/rest-api.md
+  src/components/    shared table, badge, card, page header, and long-text components every page reuses (see its README.md)
+  src/pages/         home, note, search, tags, inbox, files, check
+  test/              vitest + testing-library
 ```
 
 ## Brain repo layout

@@ -1,0 +1,122 @@
+import { Children, cloneElement, isValidElement, useMemo, type CSSProperties, type ReactElement, type ReactNode } from "react";
+import ReactMarkdown, { type Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
+import {
+  ResponsiveTable,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  type CellAlign,
+} from "@/components/data-table";
+import { SectionHeading } from "@/components/section-heading";
+import { TextLink } from "@/components/text-link";
+import { isExternalHref, replaceWikilinks, safeHref } from "@/lib/markdown";
+import { rehypeTableCellText } from "@/lib/rehype-table-cell-text";
+import { rehypeTableLabels } from "@/lib/rehype-table-labels";
+
+/** GFM column alignment arrives as an inline text-align style; map it onto the shared cell's align. */
+function alignOf(style: CSSProperties | undefined): CellAlign | undefined {
+  if (style?.textAlign === "right") return "end";
+  if (style?.textAlign === "center") return "center";
+  return undefined;
+}
+
+/** Mark the first cell of a row as the row's title (the primary cell in stacked layout). */
+function withPrimaryFirstCell(children: ReactNode): ReactNode {
+  return Children.map(children, (child, i) =>
+    i === 0 && isValidElement(child) ? cloneElement(child as ReactElement<{ primary?: boolean }>, { primary: true }) : child,
+  );
+}
+
+interface MarkdownCellProps {
+  children?: ReactNode;
+  style?: CSSProperties;
+  primary?: boolean;
+  "data-label"?: string;
+}
+
+const components: Components = {
+  // Links render through the shared TextLink: external ones open in a new tab with the icon,
+  // /notes/... and other in-app paths navigate in the same tab through the router.
+  a({ href, children, node: _node, className: _className, style: _style, target: _target, rel: _rel, ...rest }) {
+    const h = safeHref(href);
+    if (!h) return <>{children}</>;
+    return isExternalHref(h) ? (
+      <TextLink href={h} {...rest}>
+        {children}
+      </TextLink>
+    ) : (
+      <TextLink to={h} {...rest}>
+        {children}
+      </TextLink>
+    );
+  },
+  h2({ children, node: _node, className: _className, style: _style, ...rest }) {
+    return <SectionHeading {...rest}>{children}</SectionHeading>;
+  },
+  img({ src, alt, node: _node, ...rest }) {
+    const h = safeHref(typeof src === "string" ? src : undefined);
+    if (!h) return <span>{alt}</span>;
+    return <img src={h} alt={alt ?? ""} loading="lazy" {...rest} />;
+  },
+  // Tables render through the shared table so they look and behave like page tables.
+  table({ children }) {
+    return <ResponsiveTable>{children}</ResponsiveTable>;
+  },
+  thead({ children }) {
+    return <TableHeader>{children}</TableHeader>;
+  },
+  tbody({ children }) {
+    return <TableBody>{children}</TableBody>;
+  },
+  tr({ children }) {
+    return <TableRow>{withPrimaryFirstCell(children)}</TableRow>;
+  },
+  th(props) {
+    const { children, style, primary } = props as MarkdownCellProps;
+    return (
+      <TableHead align={alignOf(style)} primary={primary}>
+        {children}
+      </TableHead>
+    );
+  },
+  td(props) {
+    const { children, style, primary, "data-label": label } = props as MarkdownCellProps;
+    return (
+      <TableCell align={alignOf(style)} primary={primary} label={label}>
+        {children}
+      </TableCell>
+    );
+  },
+};
+
+const remarkPlugins = [remarkGfm];
+const rehypePlugins = [rehypeTableLabels, rehypeTableCellText];
+
+/**
+ * A note body: markdown with GFM, wikilinks turned into router links,
+ * raw HTML shown as text (react-markdown's default), unsafe hrefs dropped,
+ * links through TextLink, h2 through SectionHeading, and tables through the shared
+ * responsive table with the cell text step from rehype-table-cell-text.ts.
+ */
+export function NoteBody({ markdown }: { markdown: string }) {
+  const source = useMemo(() => replaceWikilinks(markdown), [markdown]);
+  return (
+    <div className="prose-note">
+      <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components}>
+        {source}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+/** A source note: raw material shown verbatim in monospace, wrapped. */
+export function SourceBody({ text }: { text: string }) {
+  return (
+    <pre className="whitespace-pre-wrap break-words rounded-lg border bg-muted p-4 font-mono text-[0.85rem] leading-relaxed">
+      {text}
+    </pre>
+  );
+}

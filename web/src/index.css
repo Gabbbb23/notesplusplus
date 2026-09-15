@@ -1,0 +1,241 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/*
+ * Light theme only. Google Material surfaces: an off-white page, white cards,
+ * grey hairlines, and one blue accent. No dark mode.
+ */
+:root {
+  --radius: 0.5rem;
+
+  --background: #f8f9fa;
+  --foreground: #202124;
+  --card: #ffffff;
+  --card-foreground: #202124;
+  --popover: #ffffff;
+  --popover-foreground: #202124;
+  --primary: #1a73e8;
+  --primary-hover: #1967d2;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f3f4;
+  --secondary-foreground: #202124;
+  --muted: #f1f3f4;
+  --muted-foreground: #5f6368;
+  --accent: #e8f0fe;
+  --accent-foreground: #1967d2;
+  --destructive: #d93025;
+  --destructive-foreground: #ffffff;
+  --success: #188038;
+  --warning: #f9ab00;
+  --border: #dadce0;
+  --input: #dadce0;
+  --ring: #1a73e8;
+  --mark: #fef7c3;
+
+  /*
+   * Tinted pills and card accents. Badges and cards read these through Tailwind
+   * classes (bg-kind-hub-bg, bg-status-danger-bg, ...), so a palette change is made here only.
+   */
+  --success-tint: #e6f4ea;
+  --card-hover-border: #c4c7cb;
+
+  --kind-note-bg: var(--accent);
+  --kind-note-fg: var(--accent-foreground);
+  --kind-hub-bg: var(--success-tint);
+  --kind-hub-fg: var(--success);
+  --kind-source-bg: #fef7e0;
+  --kind-source-fg: #b06000;
+  --kind-file-bg: #f3e8fd;
+  --kind-file-fg: #681da8;
+
+  --status-neutral-bg: var(--secondary);
+  --status-neutral-fg: var(--secondary-foreground);
+  --status-success-bg: var(--success-tint);
+  --status-success-fg: var(--success);
+  --status-warning-bg: var(--kind-source-bg);
+  --status-warning-fg: var(--kind-source-fg);
+  --status-danger-bg: var(--destructive);
+  --status-danger-fg: var(--destructive-foreground);
+
+  --sidebar: #ffffff;
+  --sidebar-foreground: #202124;
+  --sidebar-primary: #1a73e8;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e8f0fe;
+  --sidebar-accent-foreground: #1967d2;
+  --sidebar-border: #dadce0;
+  --sidebar-ring: #1a73e8;
+}
+
+@theme inline {
+  --font-sans: "Google Sans", Roboto, "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Roboto Mono", Consolas, "Cascadia Mono", ui-monospace, monospace;
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-mark: var(--mark);
+  --color-success-tint: var(--success-tint);
+  --color-card-hover-border: var(--card-hover-border);
+
+  --color-kind-note-bg: var(--kind-note-bg);
+  --color-kind-note-fg: var(--kind-note-fg);
+  --color-kind-hub-bg: var(--kind-hub-bg);
+  --color-kind-hub-fg: var(--kind-hub-fg);
+  --color-kind-source-bg: var(--kind-source-bg);
+  --color-kind-source-fg: var(--kind-source-fg);
+  --color-kind-file-bg: var(--kind-file-bg);
+  --color-kind-file-fg: var(--kind-file-fg);
+
+  --color-status-neutral-bg: var(--status-neutral-bg);
+  --color-status-neutral-fg: var(--status-neutral-fg);
+  --color-status-success-bg: var(--status-success-bg);
+  --color-status-success-fg: var(--status-success-fg);
+  --color-status-warning-bg: var(--status-warning-bg);
+  --color-status-warning-fg: var(--status-warning-fg);
+  --color-status-danger-bg: var(--status-danger-bg);
+  --color-status-danger-fg: var(--status-danger-fg);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    color-scheme: light;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-size: 15px;
+    line-height: 1.5;
+  }
+  mark {
+    @apply rounded-sm bg-mark px-0.5 text-foreground;
+  }
+}
+
+/*
+ * Rendered note bodies. Long-form reading: 1.6 line height, calm spacing.
+ * Some elements are not styled here because note-body.tsx renders them through shared
+ * components: links (TextLink), h2 (SectionHeading), and tables (data-table.tsx, whose
+ * wrapper resets overflow-wrap so the "anywhere" below never splits a table cell).
+ */
+.prose-note {
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.prose-note > * + * {
+  margin-top: 0.9em;
+}
+.prose-note h1,
+.prose-note h2,
+.prose-note h3,
+.prose-note h4 {
+  margin-top: 1.6em;
+}
+.prose-note h1,
+.prose-note h3,
+.prose-note h4 {
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--foreground);
+}
+.prose-note h1 {
+  font-size: 1.5rem;
+}
+.prose-note h3 {
+  font-size: 1.1rem;
+}
+.prose-note h4 {
+  font-size: 1rem;
+}
+.prose-note ul,
+.prose-note ol {
+  padding-left: 1.5rem;
+}
+.prose-note ul {
+  list-style: disc;
+}
+.prose-note ol {
+  list-style: decimal;
+}
+.prose-note li + li {
+  margin-top: 0.25em;
+}
+.prose-note li > ul,
+.prose-note li > ol {
+  margin-top: 0.25em;
+}
+.prose-note blockquote {
+  border-left: 3px solid var(--border);
+  padding-left: 1rem;
+  color: var(--muted-foreground);
+}
+.prose-note code {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  background: var(--muted);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+.prose-note pre {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.85rem 1rem;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.prose-note pre code {
+  background: none;
+  padding: 0;
+  font-size: inherit;
+}
+.prose-note img {
+  max-width: 100%;
+  border-radius: var(--radius);
+}
+.prose-note hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 1.5rem 0;
+}
+.prose-note input[type="checkbox"] {
+  margin-right: 0.4rem;
+}
