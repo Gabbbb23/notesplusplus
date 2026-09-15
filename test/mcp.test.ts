@@ -6,7 +6,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { BrainClient, type FetchLike } from "../src/mcp/client.ts";
 import { createMcpServer, formatLinkReport } from "../src/mcp/server.ts";
-import type { Note, SearchResult } from "../src/core/types.ts";
+import { SUMMARY_MAX_CHARS } from "../src/core/store/frontmatter.ts";
+import type { Note, NoteSummary, SearchResult } from "../src/core/types.ts";
 
 // ---- fake REST server -----------------------------------------------------------
 
@@ -84,6 +85,13 @@ const sampleResults: SearchResult[] = [
   },
 ];
 
+/** 120 notes in title order; the first 10 carry the hardware tag. */
+const manyNotes: NoteSummary[] = Array.from({ length: 120 }, (_, i) => {
+  const n = String(i + 1).padStart(3, "0");
+  const tags = i < 10 ? ["hardware"] : [];
+  return { slug: `note-${n}`, path: `notes/note-${n}.md`, title: `Note ${n}`, type: "note", summary: `Summary ${n}.`, tags, created: "2026-09-13", updated: "2026-09-13" };
+});
+
 // ---- client -----------------------------------------------------------------------
 
 describe("BrainClient", () => {
@@ -102,7 +110,10 @@ describe("BrainClient", () => {
 
   it("builds search query strings from options and drops undefined ones", async () => {
     const calls: Recorded[] = [];
-    const client = new BrainClient({ baseUrl: "http://localhost:4444", fetch: fakeFetch({ "GET /api/search": () => ({ body: [] }) }, calls) });
+    const client = new BrainClient({
+      baseUrl: "http://localhost:4444",
+      fetch: fakeFetch({ "GET /api/search": () => ({ body: { results: [], hasMore: false } }) }, calls),
+    });
     await client.search("ryzen", { limit: 5, tag: "hardware", mode: "keyword" });
     const params = calls[0]!.url.searchParams;
     expect(params.get("q")).toBe("ryzen");
@@ -192,9 +203,20 @@ describe("MCP server", () => {
 
     calls = [];
     routes = {
-      "GET /api/search": () => ({ body: sampleResults }),
+      // Pages like the real server: the REST default limit is 20, hasMore when results were cut.
+      "GET /api/search": (req) => {
+        const limit = Number(req.url.searchParams.get("limit") ?? 20);
+        return { body: { results: sampleResults.slice(0, limit), hasMore: sampleResults.length > limit } };
+      },
       "GET /api/notes/ryzen-laptop-specs": () => ({ body: sampleNote }),
-      "GET /api/notes": () => ({ body: [sampleNote] }),
+      "GET /api/notes": (req) => {
+        const params = req.url.searchParams;
+        const tag = params.get("tag");
+        const matching = manyNotes.filter((n) => !tag || n.tags.includes(tag));
+        const limit = Number(params.get("limit") ?? 100);
+        const offset = Number(params.get("offset") ?? 0);
+        return { body: { items: matching.slice(offset, offset + limit), total: matching.length, limit, offset } };
+      },
       "POST /api/notes": (req) => {
         const b = req.body as { frontmatter: { tags: string[] } };
         if (b.frontmatter.tags.includes("nope")) return { status: 400, body: { error: { code: "validation", message: "unknown tags: nope" } } };
@@ -202,7 +224,7 @@ describe("MCP server", () => {
       },
       "PUT /api/notes/ryzen-laptop-specs": () => ({ body: sampleNote }),
       "GET /api/check-links": () => ({ body: { brokenLinks: [], missingFiles: [], missingSources: [], invalidNotes: [] } }),
-      "GET /api/tags": () => ({ body: [{ name: "hardware", description: "Machines the owner owns." }] }),
+      "GET /api/tags": () => ({ body: [{ name: "hardware", description: "Machines the owner owns.", count: 10 }] }),
       "POST /api/inbox/take": (req) => ({
         body: { kind: "source", note: { ...sampleNote, slug: "talk-transcript", path: "sources/talk-transcript.md", type: "source", raw: "---\ntype: source\n---\nHello\n" } },
       }),
@@ -221,6 +243,8 @@ describe("MCP server", () => {
     await mcp.close();
     await fs.rm(tmp, { recursive: true, force: true });
   });
+
+  const textOf = (res: Awaited<ReturnType<Client["callTool"]>>) => (res.content as Array<{ text: string }>)[0]!.text;
 
   it("lists the full tool surface", async () => {
     const { tools } = await mcp.listTools();
@@ -245,6 +269,14 @@ describe("MCP server", () => {
     for (const t of tools) expect(t.description, `${t.name} has a description`).toBeTruthy();
   });
 
+  it("states the summary limit on write_note and inbox_take", async () => {
+    const { tools } = await mcp.listTools();
+    for (const name of ["write_note", "inbox_take"]) {
+      const schema = tools.find((t) => t.name === name)?.inputSchema as { properties: Record<string, { description?: string }> };
+      expect(schema.properties.summary?.description, name).toContain(`At most ${SUMMARY_MAX_CHARS} characters.`);
+    }
+  });
+
   it("search returns one line per hit with an indented snippet and structuredContent", async () => {
     const res = await mcp.callTool({ name: "search", arguments: { query: "ryzen", limit: 5 } });
     expect(res.isError).toBeFalsy();
@@ -255,10 +287,83 @@ describe("MCP server", () => {
       "[file] files/invoice.pdf — invoice.pdf",
       "    Total 62,000 PHP",
     ]);
-    expect((res.structuredContent as { results: SearchResult[] }).results).toEqual(sampleResults);
+    expect(res.structuredContent).toEqual({ results: sampleResults, hasMore: false });
     const call = calls.find((c) => c.url.pathname === "/api/search");
     expect(call?.url.searchParams.get("limit")).toBe("5");
     expect(call?.headers["X-Brain-Tool"]).toBe("mcp");
+  });
+
+  it("search sends limit 10 by default and ends with a hint when more results exist", async () => {
+    const plain = await mcp.callTool({ name: "search", arguments: { query: "ryzen" } });
+    expect(calls.filter((c) => c.url.pathname === "/api/search").at(-1)?.url.searchParams.get("limit")).toBe("10");
+    expect(textOf(plain)).not.toContain("More results exist");
+
+    const cut = await mcp.callTool({ name: "search", arguments: { query: "ryzen", limit: 1 } });
+    expect(cut.isError).toBeFalsy();
+    expect(textOf(cut).split("\n")).toEqual([
+      "[note] ryzen-laptop-specs — Ryzen laptop specs — The laptop has a Ryzen 7 7735HS, 16 GB RAM, and an RTX 4050.",
+      "    ...has a Ryzen 7 7735HS with 16 GB...",
+      "More results exist; raise limit (max 100) or refine the query.",
+    ]);
+    expect(cut.structuredContent).toEqual({ results: [sampleResults[0]], hasMore: true });
+  });
+
+  it("search rejects a limit over 100 in the schema, before calling the server", async () => {
+    const before = calls.length;
+    const res = await mcp.callTool({ name: "search", arguments: { query: "ryzen", limit: 101 } });
+    expect(res.isError).toBe(true);
+    expect(textOf(res)).toContain("Input validation error");
+    expect(textOf(res)).toContain("limit");
+    expect(calls.length).toBe(before);
+    expect((await mcp.callTool({ name: "search", arguments: { query: "ryzen", limit: 100 } })).isError).toBeFalsy();
+  });
+
+  it("list_notes asks for 50 notes and ends with the next offset while more remain", async () => {
+    const res = await mcp.callTool({ name: "list_notes", arguments: {} });
+    expect(res.isError).toBeFalsy();
+    const lines = textOf(res).split("\n");
+    expect(lines).toHaveLength(51);
+    expect(lines[0]).toBe("note-001 — Note 001 — Summary 001.");
+    expect(lines[49]).toBe("note-050 — Note 050 — Summary 050.");
+    expect(lines[50]).toBe("Showing 1-50 of 120 notes. Call list_notes with offset=50 for the next page, or narrow it with tag or type.");
+    const params = calls.filter((c) => c.url.pathname === "/api/notes").at(-1)!.url.searchParams;
+    expect(params.get("limit")).toBe("50");
+    expect(params.has("offset")).toBe(false);
+  });
+
+  it("list_notes follows offset to the last page, which has no footer", async () => {
+    const middle = textOf(await mcp.callTool({ name: "list_notes", arguments: { offset: 50 } })).split("\n");
+    expect(middle[0]).toBe("note-051 — Note 051 — Summary 051.");
+    expect(middle.at(-1)).toBe("Showing 51-100 of 120 notes. Call list_notes with offset=100 for the next page, or narrow it with tag or type.");
+
+    const custom = textOf(await mcp.callTool({ name: "list_notes", arguments: { limit: 7, offset: 10 } })).split("\n");
+    expect(custom).toHaveLength(8);
+    expect(custom.at(-1)).toBe("Showing 11-17 of 120 notes. Call list_notes with offset=17 for the next page, or narrow it with tag or type.");
+    const params = calls.filter((c) => c.url.pathname === "/api/notes").at(-1)!.url.searchParams;
+    expect([params.get("limit"), params.get("offset")]).toEqual(["7", "10"]);
+
+    const last = textOf(await mcp.callTool({ name: "list_notes", arguments: { offset: 100 } })).split("\n");
+    expect(last).toHaveLength(20);
+    expect(last[0]).toBe("note-101 — Note 101 — Summary 101.");
+    expect(last.at(-1)).toBe("note-120 — Note 120 — Summary 120.");
+
+    const past = await mcp.callTool({ name: "list_notes", arguments: { offset: 500 } });
+    expect(textOf(past)).toBe("No notes at offset=500. There are 120 in total.");
+  });
+
+  it("list_notes has no footer when a filter fits on one page, and checks limit and offset in the schema", async () => {
+    const lines = textOf(await mcp.callTool({ name: "list_notes", arguments: { tag: "hardware" } })).split("\n");
+    expect(lines).toHaveLength(10);
+    expect(lines.some((l) => l.startsWith("Showing"))).toBe(false);
+    expect(textOf(await mcp.callTool({ name: "list_notes", arguments: { tag: "nope" } }))).toBe("No notes.");
+
+    const before = calls.length;
+    for (const args of [{ limit: 0 }, { limit: 501 }, { offset: -1 }]) {
+      const res = await mcp.callTool({ name: "list_notes", arguments: args });
+      expect(res.isError, JSON.stringify(args)).toBe(true);
+      expect(textOf(res)).toContain("Input validation error");
+    }
+    expect(calls.length).toBe(before);
   });
 
   it("get_note returns the raw file and mtimeMs", async () => {

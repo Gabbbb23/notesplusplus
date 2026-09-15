@@ -1,16 +1,21 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, test } from "vitest";
-import { createIndex, type Embedder, type IndexOptions } from "../src/core/index/index.ts";
-import { chunkBody } from "../src/core/index/embeddings.ts";
+import { createIndex, type Embedder, type IndexOptions, type LocalSearchIndex } from "../src/core/index/index.ts";
+import { chunkBody, chunkEmbeddingText } from "../src/core/index/embeddings.ts";
 import { extractFileText } from "../src/core/index/extract.ts";
 import ExcelJS from "exceljs";
 import JSZip from "jszip";
 import {
   buildMatchExpression,
+  cosine,
   cosineTopK,
+  isStopWord,
+  keywordTerms,
   reciprocalRankFusion,
+  SEMANTIC_FLOOR,
 } from "../src/core/index/search.ts";
 import type {
   FileEntry,
@@ -38,7 +43,7 @@ async function tempDir(): Promise<string> {
   return dir;
 }
 
-async function makeIndex(extra: Partial<IndexOptions> = {}): Promise<{ idx: SearchIndex; dir: string; opts: IndexOptions }> {
+async function makeIndex(extra: Partial<IndexOptions> = {}): Promise<{ idx: LocalSearchIndex; dir: string; opts: IndexOptions }> {
   const dir = await tempDir();
   const opts: IndexOptions = {
     dbPath: path.join(dir, "cache", "index.sqlite"),
@@ -114,6 +119,22 @@ function fakeEmbedder(dims = 32): Embedder {
       });
     },
   };
+}
+
+/** Cosine similarity between a query and a single-chunk note, as the index embeds them. */
+async function similarity(embedder: Embedder, query: string, n: Note): Promise<number> {
+  const [q, d] = (await embedder.embed([query, chunkEmbeddingText(n.title, n.body)])) ?? [];
+  return cosine(q!, d!);
+}
+
+/** Run a COUNT(*) query against the index file through a second connection. */
+function countRows(dbPath: string, sql: string, ...params: string[]): number {
+  const db = new DatabaseSync(dbPath);
+  try {
+    return Number(db.prepare(sql).get(...params)?.c);
+  } finally {
+    db.close();
+  }
 }
 
 /** A minimal but real pptx: the parts PowerPoint needs, plus the given slide/notes bodies. */
@@ -255,6 +276,32 @@ describe("keyword search", () => {
     expect(hits.map((r) => r.id).sort()).toEqual(["a", "b"]);
   });
 
+  test("stop words are not required by AND and do not widen the OR fallback", async () => {
+    const { idx } = await makeIndex();
+    await idx.upsertNote(note({ slug: "prelim", title: "ITP221 schedule", body: "Prelim exams run September 22 to 26 for the first semester." }));
+    await idx.upsertNote(note({ slug: "gym", title: "Gym", body: "The gym is open when it is not raining this week." }));
+    await idx.upsertNote(note({ slug: "sauce", title: "Sauce", body: "Stir the sauce until it is thick." }));
+
+    // With "when", "is", "the", and "this" kept, AND missed the right note and OR matched all three.
+    expect((await idx.search("when is the prelim exam this semester", { mode: "keyword" })).map((r) => r.id)).toEqual(["prelim"]);
+    expect((await idx.search("the prelim or the gym", { mode: "keyword" })).map((r) => r.id).sort()).toEqual(["gym", "prelim"]);
+  });
+
+  test("a query of only stop words searches for those words", async () => {
+    const { idx } = await makeIndex();
+    await idx.upsertNote(note({ slug: "riddle", title: "Riddle", body: "What is this, and who made it?" }));
+    await idx.upsertNote(note({ slug: "plain", title: "Plain", body: "Nothing in common." }));
+    expect((await idx.search("what is this", { mode: "keyword" })).map((r) => r.id)).toEqual(["riddle"]);
+  });
+
+  test("Tagalog stop words are dropped too", async () => {
+    const { idx } = await makeIndex();
+    await idx.upsertNote(note({ slug: "rizal-law", title: "Rizal Law", body: "Republic Act 1425 was signed by President Magsaysay in 1956." }));
+    await idx.upsertNote(note({ slug: "bahay", title: "Bahay", body: "Ang bata ay kumain sa bahay kung umaga." }));
+    const hits = await idx.search("sino pumirma ang Rizal Law sa", { mode: "keyword" });
+    expect(hits.map((r) => r.id)).toEqual(["rizal-law"]);
+  });
+
   test("respects limit and sorts by descending score", async () => {
     const { idx } = await makeIndex();
     for (let i = 0; i < 5; i++) {
@@ -294,6 +341,56 @@ describe("keyword search", () => {
     expect(await idx.search("old")).toEqual([]);
     expect((await idx.search("new")).map((r) => r.id)).toEqual(["n"]);
     expect(await idx.stats()).toMatchObject({ notes: 1 });
+  });
+});
+
+// ---- FTS rows ----------------------------------------------------------------
+
+describe("FTS rows follow their note or file by rowid", () => {
+  test("rewriting a note leaves one FTS row, deleting it leaves none", async () => {
+    const { idx, opts } = await makeIndex();
+    const ftsFor = (slug: string) => countRows(opts.dbPath, "SELECT COUNT(*) AS c FROM notes_fts WHERE slug = ?", slug);
+    const aligned = () =>
+      countRows(opts.dbPath, "SELECT COUNT(*) AS c FROM notes_fts f JOIN notes n ON n.id = f.rowid AND n.slug = f.slug");
+
+    await idx.upsertNote(note({ slug: "n", body: "first draft" }));
+    await idx.upsertNote(note({ slug: "other", body: "unrelated text" }));
+    await idx.upsertNote(note({ slug: "n", body: "second draft" }));
+    await idx.upsertNote(note({ slug: "n", body: "third draft" }));
+    expect(ftsFor("n")).toBe(1);
+    expect(countRows(opts.dbPath, "SELECT COUNT(*) AS c FROM notes_fts")).toBe(2);
+    expect(aligned()).toBe(2);
+    expect((await idx.search("draft")).map((r) => r.snippet)).toEqual(["third «draft»"]);
+
+    await idx.removeNote("n");
+    expect(ftsFor("n")).toBe(0);
+    expect(aligned()).toBe(1);
+    expect((await idx.search("unrelated")).map((r) => r.id)).toEqual(["other"]);
+
+    await idx.upsertNote(note({ slug: "n", body: "back again" }));
+    await idx.recordInvalid({ path: "notes/n.md", error: "broken frontmatter" });
+    expect(ftsFor("n")).toBe(0);
+    expect(aligned()).toBe(1);
+  });
+
+  test("rewriting a file leaves one FTS row, removing it leaves none", async () => {
+    const { idx, opts } = await makeIndex();
+    const root = await tempDir();
+    const abs = path.join(root, "memo.txt");
+    const entry: FileEntry = { path: "files/memo.txt", ext: "txt", sizeBytes: 1, mtimeMs: 1 };
+    const ftsFor = (p: string) => countRows(opts.dbPath, "SELECT COUNT(*) AS c FROM files_fts WHERE path = ?", p);
+
+    await fs.writeFile(abs, "first memo");
+    await idx.upsertFile(entry, abs);
+    await idx.upsertFile({ ...entry, path: "files/other.txt" }, abs);
+    await fs.writeFile(abs, "second memo");
+    await idx.upsertFile(entry, abs);
+    expect(ftsFor("files/memo.txt")).toBe(1);
+    expect(countRows(opts.dbPath, "SELECT COUNT(*) AS c FROM files_fts f JOIN files x ON x.id = f.rowid AND x.path = f.path")).toBe(2);
+
+    await idx.removeFile(entry.path);
+    expect(ftsFor("files/memo.txt")).toBe(0);
+    expect((await idx.search("memo")).map((r) => r.id)).toEqual(["files/other.txt"]);
   });
 });
 
@@ -552,6 +649,36 @@ for (const vec of [undefined, false] as const) {
       expect(hits[0]!.score).toBeCloseTo(2 / 61, 6);
     });
 
+    test("semantic mode drops notes below the similarity floor and keeps those above", async () => {
+      const embedder = fakeEmbedder();
+      const { idx } = await makeIndex({ embeddings: true, embedder, vec });
+      const near = note({ slug: "near", title: "Fox den", body: "fox fox fox" });
+      const far = note({ slug: "far", title: "Garden log", body: "A fox walked past the garden gate with seven hungry geese and one tired farmer." });
+      await idx.upsertNote(near);
+      await idx.upsertNote(far);
+      expect(await similarity(embedder, "fox", near)).toBeGreaterThanOrEqual(SEMANTIC_FLOOR);
+      expect(await similarity(embedder, "fox", far)).toBeLessThan(SEMANTIC_FLOOR);
+
+      const hits = await idx.search("fox", { mode: "semantic" });
+      expect(hits.map((r) => r.id)).toEqual(["near"]);
+      expect(hits[0]!.score).toBeGreaterThanOrEqual(SEMANTIC_FLOOR);
+    });
+
+    test("hybrid leaves semantic candidates below the floor out of fusion", async () => {
+      const embedder = fakeEmbedder();
+      const { idx } = await makeIndex({ embeddings: true, embedder, vec });
+      // "both" matches every keyword. "close" and "far" miss "zebra", so they can only arrive through semantic search.
+      const both = note({ slug: "both", title: "Both", body: "The fox chased a zebra." });
+      const close = note({ slug: "close", title: "Fox", body: "fox fox fox" });
+      const far = note({ slug: "far", title: "Garden log", body: "A fox walked past the garden gate with seven hungry geese and one tired farmer." });
+      for (const n of [both, close, far]) await idx.upsertNote(n);
+      expect(await similarity(embedder, "fox zebra", close)).toBeGreaterThanOrEqual(SEMANTIC_FLOOR);
+      expect(await similarity(embedder, "fox zebra", far)).toBeLessThan(SEMANTIC_FLOOR);
+
+      const hits = await idx.search("fox zebra", { mode: "hybrid" });
+      expect(hits.map((r) => r.id).sort()).toEqual(["both", "close"]);
+    });
+
     test("removeNote also drops the note's vectors", async () => {
       const { idx } = await makeIndex({ embeddings: true, embedder: fakeEmbedder(), vec });
       await seedSemantic(idx);
@@ -570,13 +697,71 @@ test("semantic and hybrid degrade to keyword when the model is unavailable", asy
   expect((await idx.search("keyword", { mode: "hybrid" })).map((r) => r.id)).toEqual(["n"]);
 });
 
+describe("warm", () => {
+  test("a model that throws is swallowed and logged", async () => {
+    const logs: string[] = [];
+    const throwing: Embedder = {
+      model: "throws",
+      dims: 8,
+      embed: async () => {
+        throw new Error("onnxruntime binding missing");
+      },
+    };
+    const { idx } = await makeIndex({ embeddings: true, embedder: throwing, log: (m) => logs.push(m) });
+    logs.length = 0;
+
+    await expect(idx.warm()).resolves.toBeUndefined();
+    expect(logs).toEqual(["embedding warm-up failed: onnxruntime binding missing"]);
+  });
+
+  test("an unavailable model is logged", async () => {
+    const logs: string[] = [];
+    const { idx } = await makeIndex({ embeddings: true, embedder: { model: "none", dims: 8, embed: async () => null }, log: (m) => logs.push(m) });
+    await expect(idx.warm()).resolves.toBeUndefined();
+    expect(logs.some((l) => l.includes("model unavailable"))).toBe(true);
+  });
+
+  test("runs one embedding, and does nothing when embeddings are off", async () => {
+    const seen: string[][] = [];
+    const counting: Embedder = { ...fakeEmbedder(), embed: async (texts) => (seen.push(texts), fakeEmbedder().embed(texts)) };
+    const { idx } = await makeIndex({ embeddings: true, embedder: counting });
+    await idx.warm();
+    expect(seen).toHaveLength(1);
+
+    const off = await makeIndex({ embeddings: false, embedder: counting });
+    await off.idx.warm();
+    expect(seen).toHaveLength(1);
+  });
+});
+
 // ---- pure units ------------------------------------------------------------
 
 describe("units", () => {
   test("buildMatchExpression quotes every term and escapes inner quotes", () => {
     expect(buildMatchExpression('  foo  "bar" baz* ')).toBe('"foo" """bar""" "baz*"');
-    expect(buildMatchExpression("a b", " OR ")).toBe('"a" OR "b"');
+    expect(buildMatchExpression("x y", " OR ")).toBe('"x" OR "y"');
     expect(buildMatchExpression("   ")).toBe("");
+  });
+
+  test("keywordTerms drops English and Tagalog stop words, keeping all terms when nothing else is left", () => {
+    expect(keywordTerms("when is the prelim exam this semester")).toEqual(["prelim", "exam", "semester"]);
+    expect(keywordTerms("sino pumirma sa Rizal Law")).toEqual(["pumirma", "Rizal", "Law"]);
+    expect(keywordTerms("kailan ang prelim ng ITP221")).toEqual(["prelim", "ITP221"]);
+    expect(keywordTerms("what is this")).toEqual(["what", "is", "this"]);
+    expect(buildMatchExpression("who is the", " OR ")).toBe('"who" OR "is" OR "the"');
+    expect(buildMatchExpression("apples the bananas", " OR ")).toBe('"apples" OR "bananas"');
+  });
+
+  test("isStopWord ignores case and punctuation but keeps capitalized acronyms", () => {
+    expect(isStopWord("The")).toBe(true);
+    expect(isStopWord('"the"')).toBe(true);
+    expect(isStopWord("this?")).toBe(true);
+    expect(isStopWord("What’s")).toBe(true);
+    expect(isStopWord("IT")).toBe(false);
+    expect(isStopWord("US")).toBe(false);
+    expect(isStopWord("it")).toBe(true);
+    expect(isStopWord("prelim")).toBe(false);
+    expect(isStopWord("Law")).toBe(false);
   });
 
   test("cosineTopK ranks hand-made vectors by cosine similarity", () => {

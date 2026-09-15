@@ -46,10 +46,19 @@ export interface IndexOptions {
 
 export type { Embedder } from "./embeddings.ts";
 
+export interface LocalSearchIndex extends SearchIndex {
+  /**
+   * Load the embedding model and run one short embedding, so the first
+   * semantic query does not pay for it. Never rejects: a failure is logged and
+   * search keeps its keyword fallback.
+   */
+  warm(): Promise<void>;
+}
+
 const DEFAULT_LIMIT = 20;
 const PROGRESS_EVERY = 25;
 
-export function createIndex(opts: IndexOptions): SearchIndex {
+export function createIndex(opts: IndexOptions): LocalSearchIndex {
   const log = opts.log ?? (() => {});
   const embedder: Embedder =
     opts.embeddings === false
@@ -78,8 +87,11 @@ export function createIndex(opts: IndexOptions): SearchIndex {
     }
     db.db.prepare("DELETE FROM chunks WHERE slug = ?").run(slug);
     db.db.prepare("DELETE FROM links WHERE from_slug = ?").run(slug);
-    db.db.prepare("DELETE FROM notes_fts WHERE slug = ?").run(slug);
-    db.db.prepare("DELETE FROM notes WHERE slug = ?").run(slug);
+    const row = db.db.prepare("SELECT id FROM notes WHERE slug = ?").get(slug);
+    if (row) {
+      db.db.prepare("DELETE FROM notes_fts WHERE rowid = ?").run(Number(row.id));
+      db.db.prepare("DELETE FROM notes WHERE id = ?").run(Number(row.id));
+    }
   };
 
   const upsertNote = async (note: Note): Promise<void> => {
@@ -95,12 +107,12 @@ export function createIndex(opts: IndexOptions): SearchIndex {
 
     db.tx(() => {
       deleteNoteRows(db, note.slug);
-      db.db
+      const inserted = db.db
         .prepare(
           `INSERT INTO notes(slug, path, title, type, summary, tags_json, created, updated, body, mtime_ms)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
         )
-        .run(
+        .get(
           note.slug,
           note.path,
           note.title,
@@ -113,8 +125,8 @@ export function createIndex(opts: IndexOptions): SearchIndex {
           note.mtimeMs,
         );
       db.db
-        .prepare("INSERT INTO notes_fts(slug, title, summary, tags, body) VALUES (?, ?, ?, ?, ?)")
-        .run(note.slug, note.title, note.summary, note.tags.join(" "), note.body);
+        .prepare("INSERT INTO notes_fts(rowid, slug, title, summary, tags, body) VALUES (?, ?, ?, ?, ?, ?)")
+        .run(Number(inserted?.id), note.slug, note.title, note.summary, note.tags.join(" "), note.body);
 
       const link = db.db.prepare("INSERT OR IGNORE INTO links(from_slug, to_slug) VALUES (?, ?)");
       for (const to of note.links) link.run(note.slug, to);
@@ -141,27 +153,31 @@ export function createIndex(opts: IndexOptions): SearchIndex {
     db.tx(() => deleteNoteRows(db, slug));
   };
 
+  const deleteFileRows = (db: IndexDb, filePath: string): void => {
+    const row = db.db.prepare("SELECT id FROM files WHERE path = ?").get(filePath);
+    if (!row) return;
+    db.db.prepare("DELETE FROM files_fts WHERE rowid = ?").run(Number(row.id));
+    db.db.prepare("DELETE FROM files WHERE id = ?").run(Number(row.id));
+  };
+
   const upsertFile = async (file: FileEntry, absolutePath: string): Promise<void> => {
     const db = need();
     const text = await extractFileText(absolutePath, file.ext);
     const title = path.basename(file.path);
     db.tx(() => {
-      db.db.prepare("DELETE FROM files_fts WHERE path = ?").run(file.path);
+      deleteFileRows(db, file.path);
+      const inserted = db.db
+        .prepare(`INSERT INTO files(path, title, ext, size_bytes, mtime_ms, text) VALUES (?, ?, ?, ?, ?, ?) RETURNING id`)
+        .get(file.path, title, file.ext, file.sizeBytes, file.mtimeMs, text);
       db.db
-        .prepare(
-          `INSERT OR REPLACE INTO files(path, title, ext, size_bytes, mtime_ms, text) VALUES (?, ?, ?, ?, ?, ?)`,
-        )
-        .run(file.path, title, file.ext, file.sizeBytes, file.mtimeMs, text);
-      db.db.prepare("INSERT INTO files_fts(path, title, text) VALUES (?, ?, ?)").run(file.path, title, text);
+        .prepare("INSERT INTO files_fts(rowid, path, title, text) VALUES (?, ?, ?, ?)")
+        .run(Number(inserted?.id), file.path, title, text);
     });
   };
 
   const removeFile = async (filePath: string): Promise<void> => {
     const db = need();
-    db.tx(() => {
-      db.db.prepare("DELETE FROM files_fts WHERE path = ?").run(filePath);
-      db.db.prepare("DELETE FROM files WHERE path = ?").run(filePath);
-    });
+    db.tx(() => deleteFileRows(db, filePath));
   };
 
   const recordInvalid = async (invalid: InvalidNote): Promise<void> => {
@@ -296,9 +312,20 @@ export function createIndex(opts: IndexOptions): SearchIndex {
     idx = null;
   };
 
+  const warm = async (): Promise<void> => {
+    if (opts.embeddings === false) return;
+    try {
+      const vectors = await embedder.embed(["warm up"]);
+      if (!vectors) log("embedding warm-up: model unavailable, search falls back to keywords");
+    } catch (err) {
+      log(`embedding warm-up failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
   return {
     open,
     close,
+    warm,
     rebuild,
     upsertNote,
     removeNote,

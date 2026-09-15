@@ -4,7 +4,8 @@ import path from "node:path";
 import { simpleGit } from "simple-git";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createStore, extractLinks, isValidSlug, rewriteLinks, slugify, today } from "../src/core/store/index.ts";
-import { parseFrontmatter, serializeNote, validateFrontmatter } from "../src/core/store/frontmatter.ts";
+import { parseFrontmatter, serializeNote, SUMMARY_MAX_CHARS, validateFrontmatter } from "../src/core/store/frontmatter.ts";
+import { createIndex } from "../src/core/index/index.ts";
 import { BrainError, ConflictError, NotFoundError, ValidationError, type Note, type NoteStore } from "../src/core/types.ts";
 
 const meta = { tool: "test" };
@@ -185,6 +186,46 @@ describe("write", () => {
     expect(msg).toContain("slug");
   });
 
+  it(`accepts a ${SUMMARY_MAX_CHARS}-character summary and rejects one character more`, async () => {
+    const fits = "a".repeat(SUMMARY_MAX_CHARS);
+    const note = await store.write({ slug: "fits", frontmatter: { title: "Fits", type: "note", summary: fits, tags: [] }, body: "" }, meta);
+    expect(note.summary).toBe(fits);
+
+    // Surrounding whitespace does not count.
+    const padded = `  ${fits}\n`;
+    await expect(
+      store.write({ slug: "padded", frontmatter: { title: "Padded", type: "note", summary: padded, tags: [] }, body: "" }, meta),
+    ).resolves.toMatchObject({ slug: "padded" });
+
+    let err: unknown;
+    try {
+      await store.write(
+        { slug: "too-long", frontmatter: { title: "Too long", type: "note", summary: `${fits}a`, tags: [] }, body: "" },
+        meta,
+      );
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(ValidationError);
+    expect((err as Error).message).toBe(
+      `summary must be at most ${SUMMARY_MAX_CHARS} characters (got ${SUMMARY_MAX_CHARS + 1}). Name the one or two facts the note is about and leave lists of values to the body.`,
+    );
+    expect(await fileExists("notes/too-long.md")).toBe(false);
+  });
+
+  it("counts summary characters as code points, so an emoji is one character", async () => {
+    // Each "🚀a" is 2 code points but 3 UTF-16 units.
+    const fits = "🚀a".repeat(SUMMARY_MAX_CHARS / 2);
+    expect(fits.length).toBe(SUMMARY_MAX_CHARS * 1.5);
+    const note = await store.write({ slug: "rockets", frontmatter: { title: "Rockets", type: "note", summary: fits, tags: [] }, body: "" }, meta);
+    expect(note.summary).toBe(fits);
+    expect((await store.get("rockets"))?.summary).toBe(fits);
+
+    await expect(
+      store.write({ slug: "rockets", frontmatter: { title: "Rockets", type: "note", summary: `${fits}🚀`, tags: [] }, body: "" }, meta),
+    ).rejects.toThrow(`summary must be at most ${SUMMARY_MAX_CHARS} characters (got ${SUMMARY_MAX_CHARS + 1})`);
+  });
+
   it("preserves created on rewrite and always sets updated to today", async () => {
     await writeFile(
       "notes/old.md",
@@ -266,6 +307,12 @@ describe("get and list", () => {
     expect((await store.list({ type: "source" })).map((n) => n.slug)).toEqual(["s"]);
     expect((await store.list({ tag: "t2", type: "note" })).map((n) => n.slug)).toEqual(["a"]);
   });
+
+  it("list breaks a title tie by slug, so pages of the list stay stable", async () => {
+    await store.write({ slug: "twin-b", frontmatter: { title: "Twin", type: "note", summary: "s", tags: [] }, body: "" }, meta);
+    await store.write({ slug: "twin-a", frontmatter: { title: "Twin", type: "note", summary: "s", tags: [] }, body: "" }, meta);
+    expect((await store.list()).map((n) => n.slug)).toEqual(["index", "twin-a", "twin-b"]);
+  });
 });
 
 describe("readAll", () => {
@@ -282,6 +329,36 @@ describe("readAll", () => {
     expect(valid.sort()).toEqual(["good", "index"]);
     const missing = items.find((i) => "error" in i && i.path === "notes/missing-fields.md");
     expect(missing && "error" in missing ? missing.error : "").toMatch(/type.*summary.*tags/s);
+  });
+});
+
+describe("long summaries already on disk", () => {
+  it("still read, list, index, and search, and check_links does not flag them", async () => {
+    const summary = `Zanzibar ferry fares ${"a".repeat(479)}`;
+    expect([...summary].length).toBe(500);
+    await writeFile(
+      "notes/ferry-fares.md",
+      `---\ntitle: Ferry fares\ntype: note\nsummary: ${summary}\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\n---\nThe table is below.\n`,
+    );
+
+    expect((await store.get("ferry-fares"))?.summary).toBe(summary);
+    expect((await store.list()).find((n) => n.slug === "ferry-fares")?.summary).toBe(summary);
+    const invalid = [];
+    for await (const item of store.readAll()) if ("error" in item) invalid.push(item);
+    expect(invalid).toEqual([]);
+    expect((await store.checkLinks()).invalidNotes).toEqual([]);
+
+    const idx = createIndex({ dbPath: path.join(root, ".cache", "index.sqlite"), modelCachePath: path.join(root, ".cache", "models"), embeddings: false });
+    await idx.open();
+    try {
+      expect(await idx.rebuild(store)).toMatchObject({ notes: 2, invalid: 0 });
+      // "Zanzibar" appears only in the summary.
+      const hits = await idx.search("Zanzibar");
+      expect(hits.map((h) => h.id)).toEqual(["ferry-fares"]);
+      expect(hits[0]?.summary).toBe(summary);
+    } finally {
+      await idx.close();
+    }
   });
 });
 
@@ -401,6 +478,19 @@ describe("inbox", () => {
     await expect(store.inboxTake("y.md", { slug: "custom-slug" }, meta)).rejects.toThrow(ValidationError);
     await expect(store.inboxTake("missing.md", {}, meta)).rejects.toThrow(NotFoundError);
     await expect(store.inboxTake("../tags.yml", {}, meta)).rejects.toThrow(ValidationError);
+  });
+
+  it(`rejects a summary longer than ${SUMMARY_MAX_CHARS} characters and leaves the item in the inbox`, async () => {
+    await writeFile("inbox/long.md", "material");
+    const before = (await commitMessages()).length;
+    await expect(
+      store.inboxTake("long.md", { title: "Long", summary: "x".repeat(SUMMARY_MAX_CHARS + 1) }, meta),
+    ).rejects.toThrow(
+      `summary must be at most ${SUMMARY_MAX_CHARS} characters (got ${SUMMARY_MAX_CHARS + 1}). Name the one or two facts the note is about and leave lists of values to the body.`,
+    );
+    expect(await fileExists("inbox/long.md")).toBe(true);
+    expect(await fileExists("sources/long.md")).toBe(false);
+    expect((await commitMessages()).length).toBe(before);
   });
 
   it("moves binary items into files/ with numeric suffixes on clash", async () => {

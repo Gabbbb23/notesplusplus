@@ -33,7 +33,12 @@ interface Extractor {
   }>;
 }
 
-const BATCH_SIZE = 16;
+/**
+ * Texts per model call. Batches pad every text to the longest one, so on this
+ * CPU (Ryzen 7 7735HS, q8) one at a time is fastest: 64 real chunks took about
+ * 54 ms per chunk at batch 1, 78 at 4, 94 at 8, and 96 at 16.
+ */
+const BATCH_SIZE = 1;
 
 /** The real model. Loads on first `embed`, remembers failure so it is tried once. */
 export function createEmbedder(opts: EmbedderOptions): Embedder {

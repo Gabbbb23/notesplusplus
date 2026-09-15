@@ -1,51 +1,83 @@
 import fs from "node:fs";
 import path from "node:path";
-import { Readable } from "node:stream";
-import { Hono, type Context } from "hono";
+import { Hono, type Context, type MiddlewareHandler } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { z } from "zod";
 import {
   BrainError,
+  ForbiddenError,
+  NOTE_LIST_LIMIT,
   NotFoundError,
+  SEARCH_LIMIT,
   ValidationError,
   type Brain,
+  type NotePage,
+  type NoteSummary,
   type NoteType,
   type SearchMode,
   type SearchOptions,
+  type SearchPage,
+  type Tag,
+  type TagWithCount,
   type WriteMeta,
 } from "../core/types.ts";
+import { fileResponse } from "./file-response.ts";
+import { createLauncher, type Launcher } from "./launcher.ts";
+import { isOpenable, resolveAllowedPath } from "./local-paths.ts";
+import { noteTrail } from "./trail.ts";
 
 export interface ApiOptions {
   /** Folder holding conventions.md, file.md, and garden.md. */
   conventionsDir: string;
+  /** Starts programs for /api/open and /api/reveal. Defaults to the real one for this platform. */
+  launcher?: Launcher;
 }
 
 const CONVENTION_NAMES = new Set(["conventions", "file", "garden"]);
 
-const CONTENT_TYPES: Record<string, string> = {
-  pdf: "application/pdf",
-  png: "image/png",
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  gif: "image/gif",
-  svg: "image/svg+xml",
-  txt: "text/plain; charset=utf-8",
-  md: "text/markdown; charset=utf-8",
-  json: "application/json",
-  csv: "text/csv; charset=utf-8",
-  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  xlsm: "application/vnd.ms-excel.sheet.macroEnabled.12",
-  mp3: "audio/mpeg",
-  mp4: "video/mp4",
-  webm: "video/webm",
-};
+const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
-export function contentTypeFor(filePath: string): string {
-  const ext = path.extname(filePath).slice(1).toLowerCase();
-  return CONTENT_TYPES[ext] ?? "application/octet-stream";
+/** Hostname of a Host header (`name[:port]` or `[v6][:port]`), lower-cased, or null when it is not that shape. */
+function hostHeaderName(value: string): string | null {
+  const m = /^(\[[0-9a-f:.]+\]|[^\s:[\]/@]+)(?::\d*)?$/i.exec(value.trim());
+  return m ? m[1]!.toLowerCase() : null;
 }
+
+function originHostname(origin: string): string | null {
+  try {
+    return new URL(origin).hostname;
+  } catch {
+    return null; // includes the literal "null" origin
+  }
+}
+
+/**
+ * Any web page can make the browser send requests to localhost, and DNS rebinding can point another
+ * hostname at 127.0.0.1. Only accept requests addressed to a loopback name and not sent from another site.
+ * Hono's app.request sends no Host header, so tests fall back to the URL's hostname.
+ */
+const requestGuard: MiddlewareHandler = async (c, next) => {
+  const host = c.req.header("host");
+  const hostname = host === undefined ? new URL(c.req.url).hostname : hostHeaderName(host);
+  if (hostname === null || !LOCAL_HOSTNAMES.has(hostname)) {
+    throw new ForbiddenError("requests must be addressed to localhost");
+  }
+  if (c.req.header("sec-fetch-site")?.trim().toLowerCase() === "cross-site") {
+    throw new ForbiddenError("cross-site requests are not allowed");
+  }
+  const origin = c.req.header("origin");
+  if (origin !== undefined && !LOCAL_HOSTNAMES.has(originHostname(origin) ?? "")) {
+    throw new ForbiddenError(`origin ${origin} is not allowed`);
+  }
+  // A JSON content type forces a CORS preflight, which a plain form post from another page cannot pass.
+  if (c.req.method === "POST" && (c.req.path === "/api/open" || c.req.path === "/api/reveal")) {
+    const mediaType = (c.req.header("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
+    if (mediaType !== "application/json") {
+      throw new BrainError("Content-Type must be application/json", 415, "unsupported_media_type");
+    }
+  }
+  await next();
+};
 
 const noteType = z.enum(["note", "hub", "source"]);
 
@@ -84,6 +116,7 @@ const inboxTakeInput = z.object({
   slug: z.string().optional(),
   summary: z.string().optional(),
 });
+const pathInput = z.object({ path: z.string() });
 
 function issuesToMessage(err: z.ZodError): string {
   return err.issues
@@ -115,19 +148,24 @@ function parseNoteType(value: string | undefined, what: string): NoteType | unde
   return r.data;
 }
 
-function parseSearchOptions(c: Context): { q: string; opts: SearchOptions } {
+/** An integer query parameter, or `fallback` when it is absent or empty. 400 when it is not an integer in range. */
+function parseIntQuery(c: Context, name: string, fallback: number, min: number, max?: number): number {
+  const raw = c.req.query(name);
+  if (raw === undefined || raw === "") return fallback;
+  const n = Number(raw);
+  if (!Number.isSafeInteger(n) || n < min || (max !== undefined && n > max)) {
+    throw new ValidationError(
+      max === undefined ? `${name} must be an integer of ${min} or more` : `${name} must be an integer from ${min} to ${max}`,
+    );
+  }
+  return n;
+}
+
+function parseSearchOptions(c: Context): { q: string; limit: number; opts: SearchOptions } {
   const q = c.req.query("q");
   if (q === undefined || q.trim() === "") throw new ValidationError("q is required");
+  const limit = parseIntQuery(c, "limit", SEARCH_LIMIT.default, 1, SEARCH_LIMIT.max);
   const opts: SearchOptions = {};
-
-  const limitRaw = c.req.query("limit");
-  if (limitRaw !== undefined && limitRaw !== "") {
-    const n = Number(limitRaw);
-    if (!Number.isInteger(n) || n < 1 || n > 100) throw new ValidationError("limit must be an integer from 1 to 100");
-    opts.limit = n;
-  } else {
-    opts.limit = 20;
-  }
 
   const modeRaw = c.req.query("mode");
   if (modeRaw !== undefined && modeRaw !== "") {
@@ -146,11 +184,21 @@ function parseSearchOptions(c: Context): { q: string; opts: SearchOptions } {
   const type = parseNoteType(c.req.query("type"), "type");
   if (type) opts.type = type;
 
-  return { q, opts };
+  return { q, limit, opts };
+}
+
+/** Each tag with the number of notes carrying it, counted in one pass over the list. */
+function withCounts(tags: Tag[], notes: NoteSummary[]): TagWithCount[] {
+  const counts = new Map<string, number>();
+  for (const note of notes) {
+    for (const name of new Set(note.tags)) counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  return tags.map((t) => ({ ...t, count: counts.get(t.name) ?? 0 }));
 }
 
 export function createApi(brain: Brain, opts: ApiOptions): Hono {
   const app = new Hono();
+  const launcher = opts.launcher ?? createLauncher();
 
   app.onError((err, c) => {
     if (err instanceof BrainError) {
@@ -159,12 +207,19 @@ export function createApi(brain: Brain, opts: ApiOptions): Hono {
     return c.json({ error: { code: "internal", message: err.message } }, 500);
   });
 
+  app.use("/api/*", requestGuard);
+
   // ---- notes ----
 
   app.get("/api/notes", async (c) => {
     const tag = c.req.query("tag") || undefined;
     const type = parseNoteType(c.req.query("type"), "type");
-    return c.json(await brain.list({ tag, type }));
+    const limit = parseIntQuery(c, "limit", NOTE_LIST_LIMIT.default, 1, NOTE_LIST_LIMIT.max);
+    const offset = parseIntQuery(c, "offset", 0, 0);
+    // The store still reads every note; paging trims the response, not the scan.
+    const notes = await brain.list({ tag, type });
+    const page: NotePage = { items: notes.slice(offset, offset + limit), total: notes.length, limit, offset };
+    return c.json(page);
   });
 
   app.post("/api/notes", async (c) => {
@@ -199,16 +254,25 @@ export function createApi(brain: Brain, opts: ApiOptions): Hono {
     return c.json(await brain.backlinks(c.req.param("slug")));
   });
 
+  // `:slug` matches one path segment, so /api/notes/:slug above never captures this route.
+  app.get("/api/notes/:slug/trail", async (c) => c.json(await noteTrail(brain, c.req.param("slug"))));
+
   // ---- search ----
 
   app.get("/api/search", async (c) => {
-    const { q, opts: searchOpts } = parseSearchOptions(c);
-    return c.json(await brain.search(q, searchOpts));
+    const { q, limit, opts: searchOpts } = parseSearchOptions(c);
+    // One extra result answers whether more exist without a second query.
+    const hits = await brain.search(q, { ...searchOpts, limit: limit + 1 });
+    const page: SearchPage = { results: hits.slice(0, limit), hasMore: hits.length > limit };
+    return c.json(page);
   });
 
   // ---- tags ----
 
-  app.get("/api/tags", async (c) => c.json(await brain.tags()));
+  app.get("/api/tags", async (c) => {
+    const [tags, notes] = await Promise.all([brain.tags(), brain.list()]);
+    return c.json(withCounts(tags, notes));
+  });
 
   app.post("/api/tags", async (c) => {
     const tag = await parseBody(c, tagInput);
@@ -245,15 +309,33 @@ export function createApi(brain: Brain, opts: ApiOptions): Hono {
       throw new NotFoundError(`file ${rel}`);
     }
     if (!stat.isFile()) throw new NotFoundError(`file ${rel}`);
-    const stream = Readable.toWeb(fs.createReadStream(abs)) as unknown as ReadableStream;
-    return new Response(stream, {
-      status: 200,
-      headers: {
-        "Content-Type": contentTypeFor(abs),
-        "Content-Length": String(stat.size),
-        "Cache-Control": "no-cache",
-      },
-    });
+    return fileResponse(c, abs, stat.size);
+  });
+
+  // Files outside the brain, allowed when a note mentions them. See local-paths.ts for the rules.
+  app.get("/api/local-file", async (c) => {
+    const requested = c.req.query("path");
+    if (requested === undefined) throw new ValidationError("path is required");
+    const { abs, stat } = await resolveAllowedPath(brain, requested);
+    if (!stat.isFile()) throw new NotFoundError(`file ${requested}`);
+    return fileResponse(c, abs, stat.size);
+  });
+
+  app.post("/api/open", async (c) => {
+    const { path: requested } = await parseBody(c, pathInput);
+    const { abs, stat } = await resolveAllowedPath(brain, requested);
+    if (stat.isFile() && !isOpenable(abs)) {
+      throw new ForbiddenError(`${path.win32.basename(abs)} is not a type that can be opened; reveal it instead`);
+    }
+    await launcher.open(abs);
+    return c.json({ opened: abs });
+  });
+
+  app.post("/api/reveal", async (c) => {
+    const { path: requested } = await parseBody(c, pathInput);
+    const { abs, stat } = await resolveAllowedPath(brain, requested);
+    await launcher.reveal(abs, stat.isDirectory());
+    return c.json({ revealed: abs });
   });
 
   // ---- maintenance ----

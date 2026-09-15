@@ -1,10 +1,11 @@
 /**
  * Keyword, semantic, and hybrid ranking over the index tables.
  *
- * Keyword: FTS5 MATCH with bm25 ranking and snippet() excerpts, over notes and
- * (optionally) files. Semantic: embed the query, nearest chunks (sqlite-vec KNN
- * or in-process cosine), best chunk per note. Hybrid: reciprocal rank fusion of
- * the two lists. Every result set is sorted by descending score.
+ * Keyword: stop words dropped, then FTS5 MATCH with bm25 ranking and snippet()
+ * excerpts, over notes and (optionally) files. Semantic: embed the query,
+ * nearest chunks (sqlite-vec KNN or in-process cosine) above a similarity floor,
+ * best chunk per note. Hybrid: reciprocal rank fusion of the two lists. Every
+ * result set is sorted by descending score.
  */
 
 import type { NoteType, SearchResult } from "../types.ts";
@@ -23,16 +24,64 @@ const KNN_CHUNKS = 300;
 export const RRF_K = 60;
 
 /**
- * Build an FTS5 MATCH expression from free text. Every term is double-quoted
- * (inner quotes doubled) so operators and punctuation in the query are literal.
+ * Lowest cosine similarity (0 to 1, normalized bge vectors) a chunk needs to
+ * count as a semantic match. Below it, semantic search drops the chunk, so it
+ * never reaches hybrid fusion either. Measured on the owner's brain: semantic
+ * results for queries with no answer went from 50 to 0 while 97% of correct
+ * answers stayed.
+ */
+export const SEMANTIC_FLOOR = 0.55;
+
+/**
+ * Words dropped from keyword queries: English function words plus common
+ * Tagalog ones. Kept, they make the AND step demand words like "is" and "the"
+ * and let the OR fallback match nearly every note.
+ */
+export const STOP_WORDS: ReadonlySet<string> = new Set([
+  // English. Words that often carry meaning in a query ("not", "May", "below") are left out.
+  "a", "an", "the", "and", "or", "but", "nor", "so", "if", "then", "than", "because", "while",
+  "of", "in", "on", "at", "to", "for", "from", "by", "with", "about", "into", "onto", "as",
+  "between", "through", "during", "is", "am", "are", "was", "were", "be", "been", "being",
+  "do", "does", "did", "doing", "have", "has", "had", "having",
+  "will", "would", "shall", "should", "can", "could", "might", "must",
+  "i", "me", "my", "mine", "we", "us", "our", "ours", "you", "your", "yours", "he", "him", "his",
+  "she", "her", "hers", "it", "its", "they", "them", "their", "theirs",
+  "this", "that", "these", "those", "there", "here",
+  "what", "which", "who", "whom", "whose", "when", "where", "why", "how",
+  "all", "any", "some", "each", "every", "such", "just", "also",
+  "what's", "who's", "where's", "when's", "how's", "it's", "that's", "there's", "i'm",
+  // Tagalog
+  "ang", "ng", "mga", "sa", "na", "at", "ay", "si", "ni", "kay", "ko", "mo", "ba", "po", "nga",
+  "kung", "para", "pag", "sino", "ano", "kailan", "nasaan", "bakit",
+]);
+
+/**
+ * True when a query term is a stop word. Case and surrounding punctuation are
+ * ignored, except that a term of two or more capitals ("IT", "US", "WHO") reads
+ * as an acronym and is kept.
+ */
+export function isStopWord(term: string): boolean {
+  const bare = term.replace(/’/g, "'").replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+  if (bare.length > 1 && /\p{Lu}/u.test(bare) && bare === bare.toUpperCase()) return false;
+  return STOP_WORDS.has(bare.toLowerCase());
+}
+
+/** Split a query on whitespace and drop stop words. A query of only stop words keeps all its terms. */
+export function keywordTerms(query: string): string[] {
+  const terms = query.split(/\s+/).filter((t) => t.length > 0);
+  const content = terms.filter((t) => !isStopWord(t));
+  return content.length > 0 ? content : terms;
+}
+
+/**
+ * Build an FTS5 MATCH expression from free text, without stop words. Every term
+ * is double-quoted (inner quotes doubled) so operators and punctuation in the
+ * query are literal.
  */
 export function buildMatchExpression(query: string, joiner: " " | " OR " = " "): string {
-  const terms = query
-    .split(/\s+/)
-    .map((t) => t.trim())
-    .filter((t) => t.length > 0)
-    .map((t) => `"${t.replace(/"/g, '""')}"`);
-  return terms.join(joiner);
+  return keywordTerms(query)
+    .map((t) => `"${t.replace(/"/g, '""')}"`)
+    .join(joiner);
 }
 
 /** Reciprocal rank fusion. Each list is ordered best first; ids may repeat across lists. */
@@ -135,7 +184,7 @@ function keywordNotes(idx: IndexDb, match: string, filters: SearchFilters, limit
       `SELECT n.slug, n.path, n.title, n.type, n.summary, n.tags_json,
               bm25(notes_fts, 4.0, 3.0, 2.0, 1.0) AS rank,
               snippet(notes_fts, -1, '«', '»', '…', 24) AS snippet
-       FROM notes_fts JOIN notes n ON n.slug = notes_fts.slug
+       FROM notes_fts JOIN notes n ON n.id = notes_fts.rowid
        WHERE notes_fts MATCH ?${f.sql}
        ORDER BY rank LIMIT ?`,
     )
@@ -148,7 +197,7 @@ function keywordFiles(idx: IndexDb, match: string, limit: number): FileHit[] {
     .prepare(
       `SELECT f.path, f.title, bm25(files_fts, 3.0, 1.0) AS rank,
               snippet(files_fts, -1, '«', '»', '…', 24) AS snippet
-       FROM files_fts JOIN files f ON f.path = files_fts.path
+       FROM files_fts JOIN files f ON f.id = files_fts.rowid
        WHERE files_fts MATCH ?
        ORDER BY rank LIMIT ?`,
     )
@@ -232,7 +281,11 @@ function nearestChunks(idx: IndexDb, vector: Float32Array, k: number): Array<{ i
   );
 }
 
-/** Semantic search: best chunk per note, filtered, top `limit`. Null when the embedder is unavailable. */
+/**
+ * Semantic search: best chunk per note, filtered, top `limit`. Chunks below
+ * SEMANTIC_FLOOR are ignored, so a query with no close match returns [].
+ * Null when the embedder is unavailable.
+ */
 export async function semanticSearch(
   idx: IndexDb,
   embedder: Embedder,
@@ -244,7 +297,7 @@ export async function semanticSearch(
   const qv = vectors?.[0];
   if (!qv) return null;
 
-  const nearest = nearestChunks(idx, qv, KNN_CHUNKS);
+  const nearest = nearestChunks(idx, qv, KNN_CHUNKS).filter((c) => c.similarity >= SEMANTIC_FLOOR);
   if (nearest.length === 0) return [];
 
   const chunkStmt = idx.db.prepare("SELECT slug, text FROM chunks WHERE id = ?");

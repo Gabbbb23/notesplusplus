@@ -4,6 +4,7 @@ import {
   ConflictError,
   NotFoundError,
   ValidationError,
+  compareSummaries,
   type Brain,
   type FileEntry,
   type InboxItem,
@@ -23,6 +24,7 @@ import {
   type WriteMeta,
   type WriteNoteInput,
 } from "../../src/core/types.ts";
+import { summaryLengthProblem } from "../../src/core/store/frontmatter.ts";
 
 const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const WIKILINK = /\[\[([^\]|]+?)(?:\|[^\]]+?)?\]\]/g;
@@ -149,12 +151,14 @@ export class FakeBrain implements Brain {
     return { notes: this.notes.size, files: this.fileEntries.length, invalid: this.invalidNotes.length, durationMs: 3 };
   }
 
+  /** Same order as the real store: title, then slug. */
   async list(filter?: ListFilter): Promise<NoteSummary[]> {
     this.fail("list");
     return [...this.notes.values()]
       .filter((n) => !filter?.tag || n.tags.includes(filter.tag))
       .filter((n) => !filter?.type || n.type === filter.type)
-      .map(summaryOf);
+      .map(summaryOf)
+      .sort(compareSummaries);
   }
 
   async get(slug: string): Promise<Note | null> {
@@ -168,6 +172,8 @@ export class FakeBrain implements Brain {
     if (!SLUG_RE.test(slug)) throw new ValidationError(`bad slug: ${slug}`);
     const unknown = input.frontmatter.tags.filter((t) => !this.tagList.some((x) => x.name === t));
     if (unknown.length) throw new ValidationError(`unknown tags: ${unknown.join(", ")}`);
+    const tooLong = summaryLengthProblem(input.frontmatter.summary);
+    if (tooLong) throw new ValidationError(tooLong);
     const existing = this.notes.get(slug);
     if (input.expectedMtimeMs !== undefined && existing && existing.mtimeMs !== input.expectedMtimeMs) {
       throw new ConflictError(`${slug} changed on disk`);
@@ -255,7 +261,8 @@ export class FakeBrain implements Brain {
 
   async tags(): Promise<Tag[]> {
     this.fail("tags");
-    return [...this.tagList];
+    // The real store sorts the registry by name.
+    return [...this.tagList].sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async createTag(tag: Tag, meta: WriteMeta): Promise<Tag> {
@@ -276,6 +283,9 @@ export class FakeBrain implements Brain {
     this.fail("inboxTake");
     const item = this.inbox.get(name);
     if (!item) throw new NotFoundError(`inbox item ${name}`);
+    // Like the real store, the summary only matters when the item becomes a source note.
+    const tooLong = item.isText && opts.summary !== undefined ? summaryLengthProblem(opts.summary) : null;
+    if (tooLong) throw new ValidationError(tooLong);
     this.writes.push({ action: "inboxTake", slug: name, meta });
     this.inbox.delete(name);
     if (!item.isText) {

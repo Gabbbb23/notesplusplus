@@ -71,6 +71,12 @@ export interface Tag {
   description: string;
 }
 
+/** A tag as `GET /api/tags` returns it. */
+export interface TagWithCount extends Tag {
+  /** Notes of every type (note, hub, source) carrying the tag. */
+  count: number;
+}
+
 export interface InboxItem {
   /** Filename inside inbox/, may include subfolders. */
   name: string;
@@ -95,6 +101,23 @@ export interface LinkReport {
   missingFiles: Array<{ from: string; file: string }>;
   missingSources: Array<{ from: string; source: string }>;
   invalidNotes: InvalidNote[];
+}
+
+/** One hub in a note's breadcrumb trail. */
+export interface TrailHub {
+  slug: string;
+  title: string;
+}
+
+/** Where a note sits under the root hub `index`. */
+export interface NoteTrail {
+  /**
+   * Hubs from `index` down to the hub that links directly to the note, root first. Never includes the note.
+   * The shortest chain of hub links wins; on a tie, the hub linked first wins. Empty for `index` itself.
+   */
+  trail: TrailHub[];
+  /** False when no chain of hubs from `index` reaches the note, or `index` does not exist. */
+  inHub: boolean;
 }
 
 /** Who performed a write. Goes in the git commit message as "<tool>: <action> <slug>". */
@@ -132,6 +155,32 @@ export interface ListFilter {
   type?: NoteType;
 }
 
+/** `limit` for `GET /api/notes`: default and maximum. The MCP list_notes tool caps its input at the same maximum. */
+export const NOTE_LIST_LIMIT = { default: 100, max: 500 } as const;
+
+/** `limit` for `GET /api/search`: default and maximum. The MCP search tool caps its input at the same maximum. */
+export const SEARCH_LIMIT = { default: 20, max: 100 } as const;
+
+/** The order of every note list: by title, then by slug when titles are equal, so pages never overlap or skip. */
+export function compareSummaries(a: Pick<NoteSummary, "title" | "slug">, b: Pick<NoteSummary, "title" | "slug">): number {
+  return a.title.localeCompare(b.title) || a.slug.localeCompare(b.slug);
+}
+
+/** One page of `GET /api/notes`. */
+export interface NotePage {
+  items: NoteSummary[];
+  /** Every note matching the filters, across all pages. */
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/** `GET /api/search`: the top `limit` results, and whether more exist past them. */
+export interface SearchPage {
+  results: SearchResult[];
+  hasMore: boolean;
+}
+
 /**
  * The file store. Owns everything on disk in the brain repo and the git history.
  * Never touches SQLite.
@@ -141,6 +190,7 @@ export interface NoteStore {
   /** Create the folder layout, tags.yml, notes/index.md, and the git repo if missing. Idempotent. */
   init(): Promise<void>;
 
+  /** Every valid note matching the filter, sorted by title, then by slug when titles are equal (`compareSummaries`). */
   list(filter?: ListFilter): Promise<NoteSummary[]>;
   get(slug: string): Promise<Note | null>;
   /** Yield every parseable note and every invalid file. Used by the indexer. */
@@ -241,6 +291,7 @@ export interface Brain {
   init(): Promise<void>;
   reindex(): Promise<IndexStats>;
 
+  /** Same notes and order as `NoteStore.list`. */
   list(filter?: ListFilter): Promise<NoteSummary[]>;
   get(slug: string): Promise<Note | null>;
   write(input: WriteNoteInput, meta: WriteMeta): Promise<Note>;
@@ -285,6 +336,13 @@ export class ValidationError extends BrainError {
   constructor(message: string) {
     super(message, 400, "validation");
     this.name = "ValidationError";
+  }
+}
+
+export class ForbiddenError extends BrainError {
+  constructor(message: string) {
+    super(message, 403, "forbidden");
+    this.name = "ForbiddenError";
   }
 }
 

@@ -7,13 +7,18 @@ import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import type { LinkReport, NoteSummary, SearchResult } from "../core/types.ts";
+import { SUMMARY_MAX_CHARS } from "../core/store/frontmatter.ts";
+import { NOTE_LIST_LIMIT, SEARCH_LIMIT, type LinkReport, type NotePage, type NoteSummary, type SearchResult } from "../core/types.ts";
 import type { BrainClient } from "./client.ts";
 
 export interface McpServerOptions {
   /** Folder holding conventions.md, file.md, garden.md. */
   conventionsDir: string;
 }
+
+/** Smaller than the REST defaults: every line lands in an agent's context. */
+const SEARCH_DEFAULT_LIMIT = 10;
+const LIST_NOTES_DEFAULT_LIMIT = 50;
 
 const noteType = z.enum(["note", "hub", "source"]);
 const searchMode = z.enum(["hybrid", "keyword", "semantic"]);
@@ -41,22 +46,30 @@ export function createMcpServer(client: BrainClient, opts: McpServerOptions): Mc
     {
       title: "Search the brain",
       description:
-        "Find notes and files by meaning or keyword. Use this first whenever you need a fact or want to know whether a note already exists. Returns slug, title, summary, and a snippet per hit; open the few that matter with get_note.",
+        `Find notes and files by meaning or keyword. Use this first whenever you need a fact or want to know whether a note already exists. Returns the best ${SEARCH_DEFAULT_LIMIT} hits by default, each with slug, title, summary, and a snippet; open the few that matter with get_note. When more hits exist, the last line says so; raise limit (max ${SEARCH_LIMIT.max}) or refine the query.`,
       inputSchema: {
         query: z.string().describe("What to look for. Specific terms work best."),
-        limit: z.number().int().positive().optional().describe("Max results. Default set by the server."),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(SEARCH_LIMIT.max)
+          .optional()
+          .describe(`Max results, 1 to ${SEARCH_LIMIT.max}. Default ${SEARCH_DEFAULT_LIMIT}.`),
         tag: z.string().optional().describe("Only notes carrying this tag."),
         type: noteType.optional().describe("Only notes of this type."),
         mode: searchMode.optional().describe("hybrid (default), keyword (FTS only), or semantic (embeddings only)."),
       },
-      outputSchema: { results: z.array(searchResultSchema) },
+      outputSchema: { results: z.array(searchResultSchema), hasMore: z.boolean() },
       annotations: { readOnlyHint: true },
     },
     guard(async ({ query, limit, tag, type, mode }) => {
-      const results = await client.search(query, { limit, tag, type, mode });
+      const { results, hasMore } = await client.search(query, { limit: limit ?? SEARCH_DEFAULT_LIMIT, tag, type, mode });
+      const lines = results.map(formatSearchResult);
+      if (hasMore) lines.push(`More results exist; raise limit (max ${SEARCH_LIMIT.max}) or refine the query.`);
       return {
-        content: [{ type: "text", text: results.length === 0 ? "No results." : results.map(formatSearchResult).join("\n") }],
-        structuredContent: { results },
+        content: [{ type: "text", text: results.length === 0 ? "No results." : lines.join("\n") }],
+        structuredContent: { results, hasMore },
       };
     }),
   );
@@ -81,16 +94,24 @@ export function createMcpServer(client: BrainClient, opts: McpServerOptions): Mc
     {
       title: "List notes",
       description:
-        "List every note with slug, title, and summary, optionally filtered by tag or type. Use it to see a whole domain or all hubs; use search when you are looking for a specific fact.",
+        `List notes with slug, title, and summary, sorted by title, optionally filtered by tag or type. Returns ${LIST_NOTES_DEFAULT_LIMIT} notes per page by default; when more remain, the last line gives the offset for the next page. Use it to see a whole domain or all hubs; use search when you are looking for a specific fact.`,
       inputSchema: {
         tag: z.string().optional().describe("Only notes carrying this tag."),
         type: noteType.optional().describe("Only notes of this type."),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(NOTE_LIST_LIMIT.max)
+          .optional()
+          .describe(`Notes per page, 1 to ${NOTE_LIST_LIMIT.max}. Default ${LIST_NOTES_DEFAULT_LIMIT}.`),
+        offset: z.number().int().min(0).optional().describe("How many notes to skip, for the next page. Default 0."),
       },
       annotations: { readOnlyHint: true },
     },
-    guard(async ({ tag, type }) => {
-      const notes = await client.list({ tag, type });
-      return text(notes.length === 0 ? "No notes." : notes.map(formatSummary).join("\n"));
+    guard(async ({ tag, type, limit, offset }) => {
+      const page = await client.list({ tag, type, limit: limit ?? LIST_NOTES_DEFAULT_LIMIT, offset });
+      return text(formatNotePage(page));
     }),
   );
 
@@ -122,7 +143,11 @@ export function createMcpServer(client: BrainClient, opts: McpServerOptions): Mc
           .describe("Target slug. Omit to derive from title."),
         title: z.string().describe("A claim or a noun phrase."),
         type: noteType.describe("note, hub, or source."),
-        summary: z.string().describe("One sentence containing the fact, for an agent deciding whether to open the note."),
+        summary: z
+          .string()
+          .describe(
+            `One sentence containing the fact, for an agent deciding whether to open the note. At most ${SUMMARY_MAX_CHARS} characters.`,
+          ),
         tags: z.array(z.string()).describe("Tags from list_tags. Usually one, sometimes two."),
         body: z.string().describe("Markdown body without the frontmatter block. Lead with the fact; end with a ## Related section of wikilinks."),
         sources: z.array(z.string()).optional().describe("Slugs of source notes this was derived from."),
@@ -237,7 +262,10 @@ export function createMcpServer(client: BrainClient, opts: McpServerOptions): Mc
           .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/)
           .optional()
           .describe("Slug for the source note. Default: derived from the title."),
-        summary: z.string().optional().describe("One line: what the material is and where it came from."),
+        summary: z
+          .string()
+          .optional()
+          .describe(`One line: what the material is and where it came from. At most ${SUMMARY_MAX_CHARS} characters.`),
       },
       annotations: { destructiveHint: true },
     },
@@ -345,6 +373,21 @@ function formatSearchResult(r: SearchResult): string {
 
 function formatSummary(n: NoteSummary): string {
   return `${n.slug} — ${n.title} — ${n.summary}`;
+}
+
+/** One line per note, then a line pointing at the next page when more remain. */
+function formatNotePage(page: NotePage): string {
+  if (page.items.length === 0) {
+    return page.total === 0 ? "No notes." : `No notes at offset=${page.offset}. There are ${page.total} in total.`;
+  }
+  const lines = page.items.map(formatSummary);
+  const end = page.offset + page.items.length;
+  if (end < page.total) {
+    lines.push(
+      `Showing ${page.offset + 1}-${end} of ${page.total} notes. Call list_notes with offset=${end} for the next page, or narrow it with tag or type.`,
+    );
+  }
+  return lines.join("\n");
 }
 
 export function formatLinkReport(report: LinkReport): string {

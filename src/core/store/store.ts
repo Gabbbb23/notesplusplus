@@ -6,6 +6,7 @@ import {
   ConflictError,
   NotFoundError,
   ValidationError,
+  compareSummaries,
   type FileEntry,
   type Frontmatter,
   type InboxItem,
@@ -22,7 +23,7 @@ import {
   type WriteMeta,
   type WriteNoteInput,
 } from "../types.ts";
-import { parseFrontmatter, serializeNote, validateFrontmatter } from "./frontmatter.ts";
+import { parseFrontmatter, serializeNote, summaryLengthProblem, validateFrontmatter } from "./frontmatter.ts";
 import { GitRepo } from "./git.ts";
 import { isValidSlug, slugify } from "./slug.ts";
 import { extractLinks, rewriteLinks } from "./wikilinks.ts";
@@ -249,7 +250,7 @@ export class FileStore implements NoteStore {
         updated: item.updated,
       });
     }
-    return out.sort((a, b) => a.title.localeCompare(b.title) || a.slug.localeCompare(b.slug));
+    return out.sort(compareSummaries);
   }
 
   // ---- writing ------------------------------------------------------------
@@ -259,7 +260,7 @@ export class FileStore implements NoteStore {
     const problems: string[] = [];
     let fmInput: Frontmatter | null = null;
     try {
-      fmInput = validateFrontmatter(input.frontmatter, { knownTags });
+      fmInput = validateFrontmatter(input.frontmatter, { knownTags, limitSummary: true });
     } catch (err) {
       if (!(err instanceof ValidationError)) throw err;
       problems.push(err.message);
@@ -509,6 +510,8 @@ export class FileStore implements NoteStore {
         if (await io(() => this.locate(slug), `locate ${slug}`)) throw new ValidationError(`slug ${slug} already exists`);
         const summary = opts.summary ?? "Unprocessed source. Read it and update this summary.";
         if (typeof summary !== "string" || summary.trim() === "") throw new ValidationError("summary must be a non-empty string");
+        const tooLong = summaryLengthProblem(summary);
+        if (tooLong) throw new ValidationError(tooLong);
 
         const rel = `sources/${slug}.md`;
         const d = today();

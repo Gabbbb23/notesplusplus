@@ -15,6 +15,8 @@ export {
   serializeNote,
   NOTE_TYPES,
   DATE_RE,
+  SUMMARY_MAX_CHARS,
+  summaryLengthProblem,
   type FrontmatterInput,
   type ParsedFile,
   type ValidateOptions,

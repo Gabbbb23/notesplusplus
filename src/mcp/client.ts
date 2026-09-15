@@ -10,11 +10,13 @@ import type {
   LinkReport,
   ListFilter,
   Note,
+  NotePage,
   NoteSummary,
   RenameResult,
   SearchOptions,
-  SearchResult,
+  SearchPage,
   Tag,
+  TagWithCount,
   WriteNoteInput,
 } from "../core/types.ts";
 
@@ -42,8 +44,11 @@ export class BrainClient {
     this.fetchImpl = opts.fetch ?? ((input, init) => globalThis.fetch(input, init));
   }
 
-  list(filter: ListFilter = {}): Promise<NoteSummary[]> {
-    return this.request("GET", "/api/notes", { query: { tag: filter.tag, type: filter.type } });
+  /** One page of notes. Omitted limit and offset take the server defaults. */
+  list(filter: ListFilter & { limit?: number; offset?: number } = {}): Promise<NotePage> {
+    return this.request("GET", "/api/notes", {
+      query: { tag: filter.tag, type: filter.type, limit: filter.limit, offset: filter.offset },
+    });
   }
 
   get(slug: string): Promise<Note> {
@@ -71,7 +76,7 @@ export class BrainClient {
     return this.request("GET", `/api/notes/${encodeURIComponent(slug)}/backlinks`);
   }
 
-  search(query: string, opts: SearchOptions = {}): Promise<SearchResult[]> {
+  search(query: string, opts: SearchOptions = {}): Promise<SearchPage> {
     return this.request("GET", "/api/search", {
       query: {
         q: query,
@@ -84,7 +89,7 @@ export class BrainClient {
     });
   }
 
-  tags(): Promise<Tag[]> {
+  tags(): Promise<TagWithCount[]> {
     return this.request("GET", "/api/tags");
   }
 

@@ -1,10 +1,10 @@
 # REST API contract
 
-Base: `http://localhost:${PORT}`. JSON in, JSON out unless noted. Types refer to `src/core/types.ts`.
+Base: `http://localhost:${PORT}`. The server listens on 127.0.0.1 only. JSON in, JSON out unless noted. Types refer to `src/core/types.ts`.
 
 Every mutating request may send `X-Brain-Tool: <name>` (default `api`). It becomes the `WriteMeta.tool` in the git commit message.
 
-Errors: status from `BrainError.status` (400 validation, 404 not found, 409 conflict), 500 otherwise. Body:
+Errors: status from `BrainError.status` (400 validation, 403 forbidden, 404 not found, 409 conflict, 415 unsupported_media_type, 416 range_not_satisfiable), 500 otherwise. Body:
 
 ```json
 { "error": { "code": "validation", "message": "unknown tags: foo" } }
@@ -12,21 +12,25 @@ Errors: status from `BrainError.status` (400 validation, 404 not found, 409 conf
 
 | Method | Path | Body | Response |
 |---|---|---|---|
-| GET | `/api/notes?tag=&type=` | | `NoteSummary[]` |
+| GET | `/api/notes?tag=&type=&limit=&offset=` | | `NotePage`: `{ items: NoteSummary[], total, limit, offset }`, see [Note lists](#note-lists). |
 | POST | `/api/notes` | `WriteNoteInput` | `Note` (201). Slug derived from title if absent. |
 | GET | `/api/notes/:slug` | | `Note` |
 | PUT | `/api/notes/:slug` | `{ frontmatter, body, expectedMtimeMs? }` | `Note`. Create or replace at this slug. |
 | DELETE | `/api/notes/:slug` | | 204 |
 | POST | `/api/notes/:slug/rename` | `{ newSlug }` | `RenameResult` |
 | GET | `/api/notes/:slug/backlinks` | | `NoteSummary[]` |
-| GET | `/api/search?q=&limit=&tag=&type=&mode=&files=` | | `SearchResult[]`. `mode` hybrid/keyword/semantic, `files` true/false. |
-| GET | `/api/tags` | | `Tag[]` |
+| GET | `/api/notes/:slug/trail` | | `NoteTrail`, the hubs above a note or source, see [Trail](#trail). 404 for an unknown slug. |
+| GET | `/api/search?q=&limit=&tag=&type=&mode=&files=` | | `SearchPage`: `{ results: SearchResult[], hasMore }`, see [Search results](#search-results). `mode` hybrid/keyword/semantic, `files` true/false. |
+| GET | `/api/tags` | | `TagWithCount[]`: each `Tag` plus `count`, see [Tag counts](#tag-counts). |
 | POST | `/api/tags` | `Tag` | `Tag` (201) |
 | GET | `/api/inbox` | | `InboxItem[]` |
 | POST | `/api/inbox` | `{ name, content }` | `InboxItem` (201). Used by the web drop box too. |
 | POST | `/api/inbox/take` | `{ name, title?, slug?, summary? }` | `InboxTakeResult` |
 | GET | `/api/files` | | `FileEntry[]` |
-| GET | `/api/files/*` | | Raw file bytes with a content type. Read-only. Path traversal rejected. |
+| GET | `/api/files/*` | | Raw file bytes, see [File responses](#file-responses). Read-only. Path traversal rejected. |
+| GET | `/api/local-file?path=` | | Raw file bytes for an allowed absolute path, see [File responses](#file-responses) and [Paths](#paths). 404 for a folder. |
+| POST | `/api/open` | `{ path }` | `{ opened: "<absolute path>" }`. Opens a file in its default app or a folder in File Explorer. 403 when the file type is not on the open allowlist. |
+| POST | `/api/reveal` | `{ path }` | `{ revealed: "<absolute path>" }`. Opens File Explorer with the file selected, or opens the folder. Any file type. |
 | GET | `/api/check-links` | | `LinkReport` |
 | GET | `/api/stats` | | `{ notes, files, invalid }` |
 | POST | `/api/reindex` | | `IndexStats` |
@@ -35,3 +39,155 @@ Errors: status from `BrainError.status` (400 validation, 404 not found, 409 conf
 | GET | `/api/health` | | `{ ok: true, brainPath }` |
 
 The web UI lives on the same server under `/` (not `/api`).
+
+## Note lists
+
+`GET /api/notes` returns one page:
+
+```json
+{
+  "items": [
+    {
+      "slug": "index",
+      "path": "notes/index.md",
+      "title": "Index",
+      "type": "hub",
+      "summary": "Root hub. Lists every domain hub.",
+      "tags": [],
+      "created": "2026-09-13",
+      "updated": "2026-09-15"
+    }
+  ],
+  "total": 143,
+  "limit": 1,
+  "offset": 0
+}
+```
+
+- `limit` is an integer from 1 to 500, default 100. `offset` is an integer of 0 or more, default 0. An empty value takes the default. Anything else, such as `limit=0`, `limit=501`, `offset=-1`, or `limit=abc`, gets 400 `validation`.
+- `items` are sorted by title, then by slug when titles are equal, so walking `offset` forward by `limit` visits every note once.
+- `total` counts every note matching `tag` and `type`, not only the ones on this page. `limit` and `offset` echo what was used.
+- An `offset` at or past the end gets `"items": []` with the real `total`.
+- Invalid files are left out of `items` and `total`; `/api/check-links` reports them.
+- The server still reads every note on each request, so paging shrinks the response, not the work. The response shape does not depend on that and stays the same if lists move to the index.
+
+The MCP `list_notes` tool asks for 50 notes at a time and ends its output with the next `offset` while more remain.
+
+## Search results
+
+`GET /api/search` returns:
+
+```json
+{
+  "results": [
+    {
+      "kind": "note",
+      "id": "ryzen-laptop-specs",
+      "path": "notes/ryzen-laptop-specs.md",
+      "title": "Ryzen laptop specs",
+      "summary": "The laptop has a Ryzen 7 7735HS and an RTX 4050.",
+      "snippet": "The CPU is a «Ryzen» 7 7735HS.",
+      "score": 0.03,
+      "tags": ["hardware"],
+      "type": "note"
+    }
+  ],
+  "hasMore": true
+}
+```
+
+- `limit` is an integer from 1 to 100, default 20. 400 `validation` otherwise.
+- `results` holds at most `limit` results. `hasMore` is true when at least one more result exists past them; the server asks the index for `limit + 1` and drops the extra one.
+
+The MCP `search` tool sends `limit` 10 unless the agent gives one, and refuses a `limit` over 100 before calling the server.
+
+## Tag counts
+
+`GET /api/tags` returns every tag in the registry, sorted by name, each with `count`:
+
+```json
+[{ "name": "hardware", "description": "Laptops, parts, peripherals.", "count": 3 }]
+```
+
+- `count` is the number of valid notes of every type (note, hub, and source) that carry the tag. A tag no note uses has `count: 0`.
+- Counts come from one pass over the note list, so the web Tags page needs no `GET /api/notes?tag=` call per tag.
+
+## Frontmatter validation
+
+Writes are strict and reads are loose. `POST /api/notes` and `PUT /api/notes/:slug` answer 400 `validation` with every problem in one message when `title` or `summary` is empty, `type` is not note, hub, or source, a tag is not in the registry, `created` or `updated` is not YYYY-MM-DD, a `sources` entry is not a slug, or a `files` entry does not start with `files/`.
+
+`summary` may be at most 240 characters (`SUMMARY_MAX_CHARS` in `src/core/store/frontmatter.ts`), counted as code points after trimming, so an emoji is one character. The same limit applies to `summary` in `POST /api/inbox/take`. The message gives the actual length:
+
+```json
+{ "error": { "code": "validation", "message": "summary must be at most 240 characters (got 312). Name the one or two facts the note is about and leave lists of values to the body." } }
+```
+
+A file already on disk with a longer summary still reads, lists, indexes, and searches, and `/api/check-links` does not report it.
+
+## Trail
+
+`GET /api/notes/:slug/trail` answers where a note sits in the hub tree, for breadcrumbs:
+
+```json
+{
+  "trail": [
+    { "slug": "index", "title": "Index" },
+    { "slug": "college", "title": "College" },
+    { "slug": "ge09-life-and-works-of-rizal", "title": "GE09 Life and Works of Rizal" }
+  ],
+  "inHub": true
+}
+```
+
+- `trail` runs from the root hub `index` down to the hub that links directly to the note, root first. It never includes the note itself.
+- The server reads every note of type `hub` on each request and searches breadth-first from `index`, following wikilinks in hub bodies only. Links in other notes are never followed, and links to slugs that do not exist are ignored.
+- When several hubs list the note, the shortest chain wins. On a tie, the hub whose link comes first wins: hubs are visited in the order their links appear, level by level. Hubs that link each other do not loop.
+- `index` itself gets `{ "trail": [], "inHub": true }`.
+- A note no chain of hubs reaches, or any note when `index` does not exist, gets `{ "trail": [], "inHub": false }`.
+- Works the same for sources. 404 `not_found` when the slug does not exist.
+
+## Request guard
+
+Every `/api/*` request passes one check before its route runs, because any web page can make the browser send requests to localhost, and DNS rebinding can point another hostname at 127.0.0.1.
+
+- 403 `forbidden` when the `Host` header's hostname is not `localhost`, `127.0.0.1`, or `[::1]` (port ignored). With no `Host` header the request URL's hostname is used.
+- 403 `forbidden` when `Sec-Fetch-Site` is `cross-site`.
+- 403 `forbidden` when an `Origin` header is present and its hostname is not one of those three. `Origin: null` is refused.
+- 415 `unsupported_media_type` on `POST /api/open` and `POST /api/reveal` unless the media type of `Content-Type` is `application/json` (parameters such as `charset` are fine).
+
+The MCP client (Node fetch, no `Origin`) and the Vite dev proxy (`Host: localhost:5173`, `Origin: http://localhost:5173`) pass.
+
+## File responses
+
+`GET /api/files/*` and `GET /api/local-file` send:
+
+- `Content-Type` by extension. pdf, png, jpg/jpeg/jfif, gif, webp, bmp, docx, pptx, xlsx, xlsm, mp4/m4v, webm, mov, mkv, mp3, wav, m4a, ogg/oga, flac get their usual types. txt, md, csv, json, log, html, htm, xhtml, and xml are all `text/plain; charset=utf-8`, so nothing in a file runs on this origin. svg is `image/svg+xml` with `Content-Security-Policy: sandbox`. Anything else is `application/octet-stream`.
+- `Content-Disposition: inline; filename="<ascii fallback>"; filename*=UTF-8''<percent-encoded name>`.
+- `X-Content-Type-Options: nosniff`, `Accept-Ranges: bytes`, `Cache-Control: no-cache`.
+
+A single `Range: bytes=a-b`, `bytes=a-`, or `bytes=-n` gets 206 with `Content-Range: bytes start-end/size`. A range starting at or past the end, or `bytes=-0`, gets 416 with `Content-Range: bytes */size`. Several ranges, `b < a`, or any other shape is ignored and the whole file is sent with 200.
+
+## Paths
+
+`path` in `/api/local-file`, `/api/open`, and `/api/reveal` is either brain-relative (`files/...`, either slash) or absolute. The server decides what is allowed; the UI only asks.
+
+400 `validation` (malformed):
+
+- Empty, or relative without a leading `files/`.
+- Not a drive-letter path: absolute paths must be `C:\...` or `C:/...`. `C:file` and `\dir\file` are refused.
+- UNC paths (`\\server\share`, `//server/share`), which would send the owner's NTLM credentials to a remote host, and device paths (`\\?\`, `\\.\`).
+- Any `:` after the drive letter (alternate data streams).
+- Any `..` segment.
+- Characters Windows does not allow in file names: `" < > | ? *` and control characters.
+
+403 `forbidden` unless the path is one of:
+
+- A brain-relative `files/...` path.
+- An absolute path inside the brain root.
+- An absolute path that equals, ignoring case and slash style, a path some note mentions in single-backtick inline code, e.g. `` `C:\Important Files\College Files\Module 1.pdf` ``. Fenced code blocks and double-backtick spans do not count. A mentioned folder does not allow the files inside it.
+
+Nothing whose real location is inside the brain's `.git` is allowed, however it is spelled (junction, symlink, or 8.3 short name).
+
+404 `not_found` when the path does not exist or is neither a file nor a folder.
+
+`POST /api/open` only opens files with these extensions (case-insensitive): pdf doc docx odt rtf txt md csv ppt pptx odp xls xlsx xlsm ods png jpg jpeg jfif gif webp bmp svg mp4 m4v mov mkv avi webm wmv mp3 wav m4a ogg oga flac zip. Folders are always allowed. Every other file, including exe, bat, cmd, ps1, lnk, url, msi, a file with no extension, or a name ending in a dot or space, gets 403. `POST /api/reveal` has no type restriction.

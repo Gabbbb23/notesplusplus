@@ -16,7 +16,8 @@ import path from "node:path";
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import * as sqliteVec from "sqlite-vec";
 
-export const SCHEMA_VERSION = "1";
+/** Bump on any schema change. A mismatch on open drops every table, and the next start rebuilds from disk. */
+export const SCHEMA_VERSION = "2";
 
 export type Row = Record<string, SQLOutputValue>;
 
@@ -157,11 +158,17 @@ function dropAll(db: DatabaseSync): void {
   }
 }
 
+/**
+ * FTS rows share their rowid with the `notes.id` or `files.id` row they index,
+ * so writes delete them by rowid. The `slug` and `path` FTS columns are
+ * unindexed, and a DELETE filtered on them scans the whole table.
+ */
 function createSchema(db: DatabaseSync, dims: number, vec: boolean): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS notes(
-      slug TEXT PRIMARY KEY,
+      id INTEGER PRIMARY KEY,
+      slug TEXT NOT NULL UNIQUE,
       path TEXT NOT NULL,
       title TEXT NOT NULL,
       type TEXT NOT NULL,
@@ -194,7 +201,8 @@ function createSchema(db: DatabaseSync, dims: number, vec: boolean): void {
       embedding BLOB NOT NULL
     );
     CREATE TABLE IF NOT EXISTS files(
-      path TEXT PRIMARY KEY,
+      id INTEGER PRIMARY KEY,
+      path TEXT NOT NULL UNIQUE,
       title TEXT NOT NULL,
       ext TEXT NOT NULL,
       size_bytes INTEGER NOT NULL,

@@ -5,6 +5,16 @@ import { isValidSlug } from "./slug.ts";
 
 export const NOTE_TYPES: readonly NoteType[] = ["note", "hub", "source"];
 export const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** Longest summary a write accepts, in code points after trimming. Files already on disk may be longer. */
+export const SUMMARY_MAX_CHARS = 240;
+
+/** The reason a summary is too long to write, or null when it fits in SUMMARY_MAX_CHARS. */
+export function summaryLengthProblem(summary: string): string | null {
+  // Spread counts code points, so an emoji is one character rather than two UTF-16 units.
+  const chars = [...summary.trim()].length;
+  if (chars <= SUMMARY_MAX_CHARS) return null;
+  return `summary must be at most ${SUMMARY_MAX_CHARS} characters (got ${chars}). Name the one or two facts the note is about and leave lists of values to the body.`;
+}
 
 /** Frontmatter as it arrives on write: created/updated are optional. */
 export type FrontmatterInput = Omit<Frontmatter, "created" | "updated"> & Partial<Pick<Frontmatter, "created" | "updated">>;
@@ -47,6 +57,8 @@ export interface ValidateOptions {
   knownTags?: ReadonlySet<string>;
   /** Require created/updated to be present. True on read, false on write (the store fills them). */
   requireDates?: boolean;
+  /** Reject a summary longer than SUMMARY_MAX_CHARS. Omit on read (loose) and pass true on write (strict). */
+  limitSummary?: boolean;
 }
 
 function isStringArray(v: unknown): v is string[] {
@@ -71,7 +83,12 @@ export function validateFrontmatter(data: unknown, opts: ValidateOptions = {}): 
   }
 
   const summary = d.summary;
-  if (typeof summary !== "string" || summary.trim() === "") problems.push("summary must be a non-empty string");
+  if (typeof summary !== "string" || summary.trim() === "") {
+    problems.push("summary must be a non-empty string");
+  } else if (opts.limitSummary) {
+    const tooLong = summaryLengthProblem(summary);
+    if (tooLong) problems.push(tooLong);
+  }
 
   const tags = d.tags;
   if (!isStringArray(tags)) {
