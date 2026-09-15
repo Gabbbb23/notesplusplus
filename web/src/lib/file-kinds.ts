@@ -79,7 +79,10 @@ export const OPENABLE_EXTENSIONS: ReadonlySet<string> = new Set([
  */
 const LOCAL_ABSOLUTE_PATH = /^[A-Za-z]:[\\/][^:\r\n<>"|?*]*$/;
 
-/** True for an absolute Windows path such as "C:\Important Files\Module 1.pdf" or "D:/notes". */
+/**
+ * True for an absolute Windows path such as "C:\Important Files\Module 1.pdf" or "D:/notes". Only picks the View URL
+ * for a path already given file actions (lib/api.ts viewUrlFor); which body text is a mention is the server's call.
+ */
 export function isLocalAbsolutePath(text: string): boolean {
   return LOCAL_ABSOLUTE_PATH.test(text);
 }

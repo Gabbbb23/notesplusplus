@@ -59,7 +59,7 @@ export function HomePage() {
       {hub.error && !missing && <ErrorAlert error={hub.error} onRetry={retry} />}
       {hub.data && (
         <article>
-          <NoteBody markdown={hub.data.body} />
+          <NoteBody markdown={hub.data.body} mentions={hub.data.mentions} />
         </article>
       )}
     </>

@@ -8,7 +8,6 @@ export function createStore(root: string): NoteStore {
 
 export { FileStore, today } from "./store.ts";
 export { slugify, isValidSlug, SLUG_RE } from "./slug.ts";
-export { extractLinks, rewriteLinks } from "./wikilinks.ts";
 export {
   parseFrontmatter,
   validateFrontmatter,

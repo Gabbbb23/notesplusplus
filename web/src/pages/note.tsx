@@ -79,7 +79,7 @@ export function NotePage() {
         </MetaList>
       </PageHeader>
 
-      {n.type === "source" ? <SourceBody text={n.body} /> : <NoteBody markdown={n.body} />}
+      {n.type === "source" ? <SourceBody text={n.body} /> : <NoteBody markdown={n.body} mentions={n.mentions} />}
 
       <Separator className="my-10" />
 

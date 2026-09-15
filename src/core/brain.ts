@@ -9,6 +9,7 @@ import type {
   Note,
   NoteStore,
   NoteSummary,
+  NoteTrail,
   RenameResult,
   SearchIndex,
   SearchOptions,
@@ -23,6 +24,9 @@ import type {
  * The store is the source of truth; if an index update fails after a successful
  * write, the write stands and the error is logged. `reindex()` repairs the cache.
  * Callers get the Brain interface only; the store and index stay private.
+ *
+ * The note graph (backlinks, trails, mentions, hub membership) is answered by the index, which every write, rename,
+ * delete, inbox take, and reindex keeps current, so those reads never scan note files.
  */
 export class BrainImpl implements Brain {
   constructor(
@@ -94,6 +98,14 @@ export class BrainImpl implements Brain {
     return this.index.backlinks(slug);
   }
 
+  trail(slug: string): Promise<NoteTrail | null> {
+    return this.index.trail(slug);
+  }
+
+  isMentioned(absolutePath: string): Promise<boolean> {
+    return this.index.isMentioned(absolutePath);
+  }
+
   tags(): Promise<Tag[]> {
     return this.store.tags();
   }
@@ -133,8 +145,9 @@ export class BrainImpl implements Brain {
     return this.store.files();
   }
 
-  checkLinks(): Promise<LinkReport> {
-    return this.store.checkLinks();
+  async checkLinks(): Promise<LinkReport> {
+    const [fromFiles, membership] = await Promise.all([this.store.checkLinks(), this.index.hubMembership()]);
+    return { ...fromFiles, ...membership };
   }
 
   stats(): Promise<Omit<IndexStats, "durationMs">> {

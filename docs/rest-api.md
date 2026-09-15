@@ -14,7 +14,7 @@ Errors: status from `BrainError.status` (400 validation, 403 forbidden, 404 not 
 |---|---|---|---|
 | GET | `/api/notes?tag=&type=&limit=&offset=` | | `NotePage`: `{ items: NoteSummary[], total, limit, offset }`, see [Note lists](#note-lists). |
 | POST | `/api/notes` | `WriteNoteInput` | `Note` (201). Slug derived from title if absent. |
-| GET | `/api/notes/:slug` | | `Note` |
+| GET | `/api/notes/:slug` | | `Note`, with `links` and `mentions`, see [Links and mentions](#links-and-mentions). |
 | PUT | `/api/notes/:slug` | `{ frontmatter, body, expectedMtimeMs? }` | `Note`. Create or replace at this slug. |
 | DELETE | `/api/notes/:slug` | | 204 |
 | POST | `/api/notes/:slug/rename` | `{ newSlug }` | `RenameResult` |
@@ -31,7 +31,7 @@ Errors: status from `BrainError.status` (400 validation, 403 forbidden, 404 not 
 | GET | `/api/local-file?path=` | | Raw file bytes for an allowed absolute path, see [File responses](#file-responses) and [Paths](#paths). 404 for a folder. |
 | POST | `/api/open` | `{ path }` | `{ opened: "<absolute path>" }`. Opens a file in its default app or a folder in File Explorer. 403 when the file type is not on the open allowlist. |
 | POST | `/api/reveal` | `{ path }` | `{ revealed: "<absolute path>" }`. Opens File Explorer with the file selected, or opens the folder. Any file type. |
-| GET | `/api/check-links` | | `LinkReport` |
+| GET | `/api/check-links` | | `LinkReport`, see [Check links](#check-links). |
 | GET | `/api/stats` | | `{ notes, files, invalid }` |
 | POST | `/api/reindex` | | `IndexStats` |
 | GET | `/api/conventions` | | `text/markdown`, contents of `conventions/conventions.md` |
@@ -124,6 +124,19 @@ Writes are strict and reads are loose. `POST /api/notes` and `PUT /api/notes/:sl
 
 A file already on disk with a longer summary still reads, lists, indexes, and searches, and `/api/check-links` does not report it.
 
+## Links and mentions
+
+`GET /api/notes/:slug` reads the note file from disk and parses its body once (`parseNoteBody` in `src/core/graph/note-body.ts`). The parser builds the same markdown syntax tree with GFM that the web view renders, so code means what the owner sees as code: inline code with any number of backticks, fenced blocks with ```` ``` ```` or `~~~`, and indented blocks.
+
+- `links`: targets of `[[slug]]` and `[[slug|label]]` written in plain text, trimmed, deduplicated, in order of first appearance. Nothing inside code or inside a markdown link's text counts, nor a link that other markup splits (`[[slug|*label*]]`). In a table cell, write the label pipe as `\|`, or GFM splits the cell there.
+- `mentions`: inline code spans, outside a markdown link, whose whole text is a drive-letter absolute path that [Paths](#paths) would accept as a request (no UNC or device path, no colon after the drive letter, no `..` segment, none of `" < > | ? *`). Exactly as written, deduplicated, in body order. The web view gives exactly these spans View, Open, and Show in folder.
+
+```json
+{ "slug": "ethics", "links": ["ge09-life-and-works-of-rizal"], "mentions": ["C:\\Important Files\\College Files\\Module 1.pdf"] }
+```
+
+Every write, rename, delete, inbox take, and reindex stores the links and mentions in the index. Backlinks, trails, [Check links](#check-links) hub membership, and the [Paths](#paths) allowlist read them from there, never from the note files. A note edited by hand outside the tools changes them only after `POST /api/reindex`. Renaming a note rewrites only what `links` would list, so `[[old-slug]]` inside code stays as written.
+
 ## Trail
 
 `GET /api/notes/:slug/trail` answers where a note sits in the hub tree, for breadcrumbs:
@@ -140,11 +153,32 @@ A file already on disk with a longer summary still reads, lists, indexes, and se
 ```
 
 - `trail` runs from the root hub `index` down to the hub that links directly to the note, root first. It never includes the note itself.
-- The server reads every note of type `hub` on each request and searches breadth-first from `index`, following wikilinks in hub bodies only. Links in other notes are never followed, and links to slugs that do not exist are ignored.
+- The answer is a breadth-first search from `index` that follows links in hub bodies only. Links in other notes are never followed, and links to slugs that do not exist are ignored.
 - When several hubs list the note, the shortest chain wins. On a tie, the hub whose link comes first wins: hubs are visited in the order their links appear, level by level. Hubs that link each other do not loop.
+- The server reads no note files for it. It walks up from the note through the links in the index, one lookup per level of hubs above the note, so the cost does not grow with the number of notes. A hand edit shows up after `POST /api/reindex`.
 - `index` itself gets `{ "trail": [], "inHub": true }`.
 - A note no chain of hubs reaches, or any note when `index` does not exist, gets `{ "trail": [], "inHub": false }`.
-- Works the same for sources. 404 `not_found` when the slug does not exist.
+- Works the same for sources. 404 `not_found` when the index holds no note with that slug.
+
+## Check links
+
+`GET /api/check-links` returns a `LinkReport`:
+
+```json
+{
+  "brokenLinks": [{ "from": "dangling", "to": "nowhere" }],
+  "missingFiles": [{ "from": "dangling", "file": "files/missing.pdf" }],
+  "missingSources": [{ "from": "dangling", "source": "gone" }],
+  "invalidNotes": [{ "path": "notes/junk.md", "error": "frontmatter block is missing" }],
+  "notesWithoutHub": [{ "slug": "dangling" }],
+  "notesInSeveralHubs": [{ "slug": "rizal-day", "hubs": ["college", "ge09-life-and-works-of-rizal"] }]
+}
+```
+
+- `brokenLinks`, `missingFiles`, `missingSources`, and `invalidNotes` come from reading every note file.
+- `notesWithoutHub` and `notesInSeveralHubs` come from the index. A hub lists a note when the hub's body links to it (`links` above); the root hub `index` counts as a hub.
+- Only notes of type `note` are checked, because conventions put every note in exactly one domain hub and have `index` list the hubs. Hubs, including `index` and sub-hubs that link back to their parent, and sources are never reported.
+- Both lists are sorted by slug, and each entry's `hubs` too.
 
 ## Request guard
 
@@ -184,7 +218,7 @@ A single `Range: bytes=a-b`, `bytes=a-`, or `bytes=-n` gets 206 with `Content-Ra
 
 - A brain-relative `files/...` path.
 - An absolute path inside the brain root.
-- An absolute path that equals, ignoring case and slash style, a path some note mentions in single-backtick inline code, e.g. `` `C:\Important Files\College Files\Module 1.pdf` ``. Fenced code blocks and double-backtick spans do not count. A mentioned folder does not allow the files inside it.
+- An absolute path that equals, ignoring case, slash style, and a trailing separator, a path some note mentions, e.g. `` `C:\Important Files\College Files\Module 1.pdf` `` (see [Links and mentions](#links-and-mentions) for what counts). Any number of backticks counts; code blocks, a path inside a markdown link, and plain text do not. A mentioned folder does not allow the files inside it. The check is one lookup in the index, so a PDF viewer's Range requests and a video's seeks never reread the notes.
 
 Nothing whose real location is inside the brain's `.git` is allowed, however it is spelled (junction, symlink, or 8.3 short name).
 

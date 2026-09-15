@@ -15,7 +15,7 @@ describe("<NoteBody> tables", () => {
   it("renders GFM tables through the shared responsive table with labelled cells", () => {
     const { container } = render(
       <MemoryRouter>
-        <NoteBody markdown={markdown} />
+        <NoteBody markdown={markdown} mentions={[]} />
       </MemoryRouter>,
     );
 
@@ -50,7 +50,7 @@ describe("<NoteBody> tables", () => {
   it("gives every text column header the 6rem minimum width", () => {
     render(
       <MemoryRouter>
-        <NoteBody markdown={markdown} />
+        <NoteBody markdown={markdown} mentions={[]} />
       </MemoryRouter>,
     );
     for (const header of screen.getAllByRole("columnheader")) {
@@ -70,6 +70,7 @@ describe("<NoteBody> tables", () => {
 | Target | ≥ 20/month cross-region |
 | Link | ${url} |
 `}
+          mentions={[]}
         />
       </MemoryRouter>,
     );
@@ -100,12 +101,17 @@ describe("<NoteBody> local file paths", () => {
   // "# 1" would get a non-breaking space from the table cell step if the path were read after it.
   const cellPath = String.raw`C:\Important Files\College Files\College Junior Year\1st Sem\GE08 - Ethics\Module # 1.pptx`;
   const fencedPath = String.raw`C:\Important Files\Syllabus.pdf`;
+  const doublePath = String.raw`D:\Videos\Lecture 3.mp4`;
+  const traversalPath = String.raw`C:\Important Files\Up\..\Module 1.pdf`;
   const body = [
     "Readings:",
     "",
     "- `" + listPath + "`",
     "- Run `npm test` before class.",
     "- See [`" + fencedPath + "`](https://example.com/syllabus).",
+    "- Lecture: ``" + doublePath + "``",
+    "- Not a mention: `" + traversalPath + "`",
+    "- The syllabus again: `" + fencedPath + "`",
     "",
     "| Week | File |",
     "|---|---|",
@@ -115,14 +121,45 @@ describe("<NoteBody> local file paths", () => {
     fencedPath,
     "```",
   ].join("\n");
+  // What the server lists for this body: inline code outside links, as written, in body order.
+  // The traversal path is not a mention, so the server never lists it.
+  const mentions = [listPath, doublePath, fencedPath, cellPath];
 
   function renderBody() {
     return render(
       <MemoryRouter>
-        <NoteBody markdown={body} />
+        <NoteBody markdown={body} mentions={mentions} />
       </MemoryRouter>,
     );
   }
+
+  it("gives file actions only to inline code the server lists, never to a path inside a link", () => {
+    renderBody();
+    const [, , linkItem, doubleItem, traversalItem, againItem] = screen.getAllByRole("listitem");
+
+    // Double backticks are code like single ones, and the server lists the path.
+    expect(doubleItem!.querySelector("code")!.textContent).toBe(doublePath);
+    expect(within(doubleItem!).getByRole("button", { name: "Show Lecture 3.mp4 in File Explorer" })).toBeInTheDocument();
+
+    // The same text inside a link gets no buttons, though it is a mention further down.
+    expect(within(linkItem!).queryByRole("button")).toBeNull();
+    expect(within(againItem!).getByRole("button", { name: "Show Syllabus.pdf in File Explorer" })).toBeInTheDocument();
+
+    // A path the server does not list stays plain code, however much it looks like a path.
+    expect(traversalItem!.querySelector("code")!.textContent).toBe(traversalPath);
+    expect(within(traversalItem!).queryByRole("button")).toBeNull();
+    expect(traversalItem!.querySelector("[data-slot='file-link']")).toBeNull();
+  });
+
+  it("gives no file actions at all when the server lists no mentions", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <NoteBody markdown={body} mentions={[]} />
+      </MemoryRouter>,
+    );
+    expect(screen.queryAllByRole("button")).toEqual([]);
+    expect(container.querySelector("[data-slot='file-link']")).toBeNull();
+  });
 
   it("gives a path in a list item the file actions, shown as code", () => {
     renderBody();
@@ -170,6 +207,50 @@ describe("<NoteBody> local file paths", () => {
   });
 });
 
+describe("<NoteBody> wikilinks", () => {
+  // The same code rule as the server's parser (test/note-body.test.ts at the repo root): a link is
+  // [[slug]] in text, never in code of any kind or inside a markdown link.
+  function renderMarkdown(markdown: string) {
+    return render(
+      <MemoryRouter>
+        <NoteBody markdown={markdown} mentions={[]} />
+      </MemoryRouter>,
+    );
+  }
+
+  const linked: Array<[string, string, string, string]> = [
+    ["a plain link", "See [[alpha]].", "alpha", "/notes/alpha"],
+    ["a labelled link, trimmed", "See [[ beta | Beta label ]].", "Beta label", "/notes/beta"],
+    ["a slug that needs encoding", "See [[a b]].", "a b", "/notes/a%20b"],
+    ["a labelled link in a table cell with an escaped pipe", "| Term | Note |\n|---|---|\n| X | [[t\\|the t]] |", "the t", "/notes/t"],
+  ];
+
+  it.each(linked)("links %s", (_label, markdown, name, href) => {
+    renderMarkdown(markdown);
+    expect(screen.getByRole("link", { name })).toHaveAttribute("href", href);
+  });
+
+  const inCode: Array<[string, string]> = [
+    ["single-backtick code", "Inline `[[in-code]]` here."],
+    ["a double-backtick span", "Inline ``[[in-code]]`` here."],
+    ["a ``` fence", "```\n[[in-code]]\n```"],
+    ["a ~~~ fence", "~~~\n[[in-code]]\n~~~"],
+    ["an indented code block", "Para.\n\n    [[in-code]]\n"],
+  ];
+
+  it.each(inCode)("does not link [[x]] in %s and shows it as written", (_label, markdown) => {
+    const { container } = renderMarkdown(markdown);
+    expect(screen.queryByRole("link")).toBeNull();
+    expect(container.querySelector("code")!.textContent).toContain("[[in-code]]");
+  });
+
+  it("does not link [[x]] inside a markdown link's text", () => {
+    renderMarkdown("[see [[inside]]](https://example.com) and [[outside]]");
+    expect(screen.getAllByRole("link").map((a) => a.getAttribute("href"))).toEqual(["https://example.com", "/notes/outside"]);
+    expect(screen.getByRole("link", { name: /see \[\[inside\]\]/ })).toBeInTheDocument();
+  });
+});
+
 describe("<NoteBody> callouts", () => {
   it("renders each GitHub alert as a Notice with its tone and title, without the marker, and keeps plain blockquotes", () => {
     const markers = ["NOTE", "TIP", "IMPORTANT", "WARNING", "CAUTION"];
@@ -177,6 +258,7 @@ describe("<NoteBody> callouts", () => {
       <MemoryRouter>
         <NoteBody
           markdown={[...markers.map((m) => `> [!${m}]\n> About ${m.toLowerCase()}, see [[other-note]].`), "> Just a quote."].join("\n\n")}
+          mentions={[]}
         />
       </MemoryRouter>,
     );
@@ -210,7 +292,7 @@ describe("<NoteBody> links and headings", () => {
   it("renders links through TextLink and h2 through SectionHeading", () => {
     render(
       <MemoryRouter>
-        <NoteBody markdown={"## Budget\n\nSee [[other-note]] and [the site](https://example.com)."} />
+        <NoteBody markdown={"## Budget\n\nSee [[other-note]] and [the site](https://example.com)."} mentions={[]} />
       </MemoryRouter>,
     );
     const internal = screen.getByRole("link", { name: "other-note" });

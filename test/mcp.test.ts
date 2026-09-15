@@ -362,17 +362,44 @@ describe("MCP server", () => {
     await c.close();
   });
 
-  it("check_links says No problems. when every list is empty", async () => {
-    const res = await mcp.callTool({ name: "check_links", arguments: {} });
-    expect(textOf(res)).toBe("No problems.");
+  it("check_links lists notes no hub lists and notes in several hubs, and says No problems. once every list is empty", async () => {
+    // No hub lists the seeded note or the one write_note created above yet. The source is never reported.
+    expect(textOf(await mcp.callTool({ name: "check_links", arguments: {} }))).toBe("Notes no hub lists:\n  new-note\n  ryzen-laptop-specs");
+
+    const hubInput = (slug: string, body: string) => ({ slug, frontmatter: { title: slug, type: "hub" as const, summary: "s", tags: [] }, body });
+    await tb.brain.write(hubInput("hardware", "- [[ryzen-laptop-specs]]\n- [[new-note]]\n"), meta);
+    await tb.brain.write(hubInput("laptops", "- [[ryzen-laptop-specs]]\n"), meta);
+    expect(textOf(await mcp.callTool({ name: "check_links", arguments: {} }))).toBe(
+      "Notes listed by more than one hub:\n  ryzen-laptop-specs <- hardware, laptops",
+    );
+
+    await tb.brain.delete("laptops", meta);
+    expect(textOf(await mcp.callTool({ name: "check_links", arguments: {} }))).toBe("No problems.");
+
     expect(
       formatLinkReport({
         brokenLinks: [{ from: "a", to: "b" }],
         missingFiles: [],
         missingSources: [{ from: "a", source: "s" }],
         invalidNotes: [{ path: "notes/x.md", error: "missing title" }],
+        notesWithoutHub: [{ slug: "a" }, { slug: "c" }],
+        notesInSeveralHubs: [{ slug: "d", hubs: ["h1", "h2"] }],
       }),
-    ).toBe("Broken links:\n  a -> [[b]]\nMissing sources:\n  a -> s\nInvalid notes:\n  notes/x.md: missing title");
+    ).toBe(
+      [
+        "Broken links:",
+        "  a -> [[b]]",
+        "Missing sources:",
+        "  a -> s",
+        "Invalid notes:",
+        "  notes/x.md: missing title",
+        "Notes no hub lists:",
+        "  a",
+        "  c",
+        "Notes listed by more than one hub:",
+        "  d <- h1, h2",
+      ].join("\n"),
+    );
   });
 
   it("inbox_take returns the source slug and its full contents", async () => {

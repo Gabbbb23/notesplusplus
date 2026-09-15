@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractMentionedPaths, isOpenable, parseRequestedPath, pathKey } from "../src/api/local-paths.ts";
+import { isOpenable, parseRequestedPath } from "../src/api/local-paths.ts";
 import { ValidationError } from "../src/core/types.ts";
 
 describe("parseRequestedPath", () => {
@@ -40,39 +40,6 @@ describe("parseRequestedPath", () => {
 
   it.each(rejected)("rejects %s", (_label, input) => {
     expect(() => parseRequestedPath(input)).toThrow(ValidationError);
-  });
-});
-
-describe("pathKey", () => {
-  it("ignores case, slash style, and a trailing separator", () => {
-    expect(pathKey("C:\\Important Files\\College\\")).toBe(pathKey("c:/important files/COLLEGE"));
-    expect(pathKey("C:\\Important Files\\College")).not.toBe(pathKey("C:\\Important Files\\College 2"));
-  });
-});
-
-describe("extractMentionedPaths", () => {
-  it("collects single-backtick inline code paths and skips everything else", () => {
-    const body = [
-      "Module 1 is `C:\\College\\Module 1.pdf`, folder `c:/college/notes/`.",
-      "Not paths: `npm test`, `files/invoice.pdf`, `C:relative.pdf`.",
-      "Double backticks do not count: ``C:\\Double\\x.pdf``",
-      "Invalid shapes do not count: `\\\\server\\share\\c.pdf` `C:\\x\\..\\y.pdf` `C:\\a.pdf:ads`",
-      "```",
-      "`C:\\Fenced\\a.pdf`",
-      "```",
-      "~~~~",
-      "```",
-      "`C:\\Tilde\\b.pdf`",
-      "~~~~",
-      "After fences: `D:\\Videos\\Lecture 3.mp4`",
-      "```text",
-      "`C:\\Unclosed\\d.pdf`",
-    ].join("\n");
-    expect(extractMentionedPaths(body)).toEqual(["C:\\College\\Module 1.pdf", "C:\\college\\notes", "D:\\Videos\\Lecture 3.mp4"]);
-  });
-
-  it("handles CRLF bodies and several spans on one line", () => {
-    expect(extractMentionedPaths("`C:\\a.pdf` and `C:\\b.pdf`\r\n```\r\n`C:\\c.pdf`\r\n```\r\n")).toEqual(["C:\\a.pdf", "C:\\b.pdf"]);
   });
 });
 

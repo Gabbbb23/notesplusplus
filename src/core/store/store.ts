@@ -12,21 +12,21 @@ import {
   type InboxItem,
   type InboxTakeResult,
   type InvalidNote,
-  type LinkReport,
   type ListFilter,
   type Note,
   type NoteStore,
   type NoteSummary,
   type NoteType,
   type RenameResult,
+  type StoreLinkReport,
   type Tag,
   type WriteMeta,
   type WriteNoteInput,
 } from "../types.ts";
+import { parseNoteBody, rewriteLinks } from "../graph/note-body.ts";
 import { parseFrontmatter, serializeNote, summaryLengthProblem, validateFrontmatter } from "./frontmatter.ts";
 import { GitRepo } from "./git.ts";
 import { isValidSlug, slugify } from "./slug.ts";
-import { extractLinks, rewriteLinks } from "./wikilinks.ts";
 
 const TEXT_EXTS = new Set(["md", "markdown", "txt", "text", "csv", "json", "srt", "vtt", "log"]);
 const NOTE_DIRS = ["notes", "sources"] as const;
@@ -169,8 +169,17 @@ export class FileStore implements NoteStore {
     return null;
   }
 
-  /** Read and validate a note file. Throws ValidationError for bad content; io errors become BrainError. */
+  /** Read and validate a note file, and parse its body for links and mentions. Throws like readSummary. */
   private async readNote(rel: string): Promise<Note> {
+    const note = await this.readSummary(rel);
+    return { ...note, ...parseNoteBody(note.body) };
+  }
+
+  /**
+   * Read and validate a note file without parsing its body. Parsing costs about 2.5 ms per note on the owner's brain,
+   * so lists and rename's scan skip it. Throws ValidationError for bad content; io errors become BrainError.
+   */
+  private async readSummary(rel: string): Promise<Omit<Note, "links" | "mentions">> {
     const abs = this.abs(rel);
     const [raw, stat] = await io(() => Promise.all([fs.readFile(abs, "utf8"), fs.stat(abs)]), `read ${rel}`);
     const slug = path.posix.basename(rel, ".md");
@@ -194,7 +203,6 @@ export class FileStore implements NoteStore {
       frontmatter,
       body: parsed.body,
       raw,
-      links: extractLinks(parsed.body),
       mtimeMs: stat.mtimeMs,
     };
   }
@@ -213,7 +221,11 @@ export class FileStore implements NoteStore {
     }
   }
 
-  async *readAll(): AsyncIterable<Note | InvalidNote> {
+  readAll(): AsyncIterable<Note | InvalidNote> {
+    return this.readEvery((rel) => this.readNote(rel));
+  }
+
+  private async *readEvery<T>(read: (rel: string) => Promise<T>): AsyncIterable<T | InvalidNote> {
     for (const dir of NOTE_DIRS) {
       let names: string[];
       try {
@@ -225,7 +237,7 @@ export class FileStore implements NoteStore {
       for (const name of names) {
         const rel = `${dir}/${name}`;
         try {
-          yield await this.readNote(rel);
+          yield await read(rel);
         } catch (err) {
           yield { path: rel, error: err instanceof Error ? err.message : String(err) };
         }
@@ -235,7 +247,7 @@ export class FileStore implements NoteStore {
 
   async list(filter: ListFilter = {}): Promise<NoteSummary[]> {
     const out: NoteSummary[] = [];
-    for await (const item of this.readAll()) {
+    for await (const item of this.readEvery((rel) => this.readSummary(rel))) {
       if ("error" in item) continue;
       if (filter.type && item.type !== filter.type) continue;
       if (filter.tag && !item.tags.includes(filter.tag)) continue;
@@ -359,9 +371,10 @@ export class FileStore implements NoteStore {
 
       // Collect the rewrites before touching disk so a bad file cannot leave a half-done rename.
       const rewrites: Array<{ rel: string; content: string; slug: string }> = [];
-      for await (const item of this.readAll()) {
+      for await (const item of this.readEvery((rel) => this.readSummary(rel))) {
         if ("error" in item || item.path === oldRel) continue;
-        const linked = item.links.includes(oldSlug);
+        // Only a body that contains the slug can link to it, so most notes skip the parse.
+        const linked = item.body.includes(oldSlug) && parseNoteBody(item.body).links.includes(oldSlug);
         const sourced = item.frontmatter.sources?.includes(oldSlug) ?? false;
         if (!linked && !sourced) continue;
         const fm: Frontmatter = { ...item.frontmatter };
@@ -581,9 +594,9 @@ export class FileStore implements NoteStore {
 
   // ---- integrity ----------------------------------------------------------
 
-  async checkLinks(): Promise<LinkReport> {
+  async checkLinks(): Promise<StoreLinkReport> {
     const notes: Note[] = [];
-    const report: LinkReport = { brokenLinks: [], missingFiles: [], missingSources: [], invalidNotes: [] };
+    const report: StoreLinkReport = { brokenLinks: [], missingFiles: [], missingSources: [], invalidNotes: [] };
     for await (const item of this.readAll()) {
       if ("error" in item) report.invalidNotes.push(item);
       else notes.push(item);

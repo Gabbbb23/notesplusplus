@@ -7,13 +7,17 @@
  */
 
 import path from "node:path";
+import { checkDrivePath, pathKey } from "../graph/drive-path.ts";
+import { findTrail, ROOT_HUB, type HubLinks } from "../graph/trail.ts";
 import type {
   FileEntry,
+  HubMembershipReport,
   IndexStats,
   InvalidNote,
   Note,
   NoteStore,
   NoteSummary,
+  NoteTrail,
   NoteType,
   SearchIndex,
   SearchOptions,
@@ -87,6 +91,7 @@ export function createIndex(opts: IndexOptions): LocalSearchIndex {
     }
     db.db.prepare("DELETE FROM chunks WHERE slug = ?").run(slug);
     db.db.prepare("DELETE FROM links WHERE from_slug = ?").run(slug);
+    db.db.prepare("DELETE FROM mentions WHERE slug = ?").run(slug);
     const row = db.db.prepare("SELECT id FROM notes WHERE slug = ?").get(slug);
     if (row) {
       db.db.prepare("DELETE FROM notes_fts WHERE rowid = ?").run(Number(row.id));
@@ -128,8 +133,10 @@ export function createIndex(opts: IndexOptions): LocalSearchIndex {
         .prepare("INSERT INTO notes_fts(rowid, slug, title, summary, tags, body) VALUES (?, ?, ?, ?, ?, ?)")
         .run(Number(inserted?.id), note.slug, note.title, note.summary, note.tags.join(" "), note.body);
 
-      const link = db.db.prepare("INSERT OR IGNORE INTO links(from_slug, to_slug) VALUES (?, ?)");
-      for (const to of note.links) link.run(note.slug, to);
+      const link = db.db.prepare("INSERT OR IGNORE INTO links(from_slug, to_slug, ord) VALUES (?, ?, ?)");
+      note.links.forEach((to, ord) => link.run(note.slug, to, ord));
+      const mention = db.db.prepare("INSERT INTO mentions(slug, ord, path, key) VALUES (?, ?, ?, ?)");
+      note.mentions.forEach((written, ord) => mention.run(note.slug, ord, written, pathKey(written)));
 
       const insChunk = db.db.prepare("INSERT INTO chunks(slug, ord, text) VALUES (?, ?, ?) RETURNING id");
       const insVector = db.db.prepare("INSERT INTO chunk_vectors(chunk_id, embedding) VALUES (?, ?)");
@@ -193,7 +200,7 @@ export function createIndex(opts: IndexOptions): LocalSearchIndex {
 
   const clearAll = (db: IndexDb): void => {
     db.tx(() => {
-      for (const t of ["notes_fts", "files_fts", "notes", "links", "chunks", "chunk_vectors", "files", "invalid"]) {
+      for (const t of ["notes_fts", "files_fts", "notes", "links", "mentions", "chunks", "chunk_vectors", "files", "invalid"]) {
         db.db.exec(`DELETE FROM ${t}`);
       }
       if (db.vec) db.db.exec("DELETE FROM chunk_vec");
@@ -278,6 +285,81 @@ export function createIndex(opts: IndexOptions): LocalSearchIndex {
     }));
   };
 
+  /**
+   * The trail from the note graph. Instead of loading every hub, it walks up from the note: one indexed lookup per
+   * level fetches the hubs linking to the current level, until no new hub appears. The walk does not continue past
+   * the root hub, where every trail starts, so hubs that link back to `index` are not pulled in. findTrail over the
+   * hubs found gives the same answer as over every hub (see findTrail). The work grows with the hubs above the note,
+   * not with the number of notes.
+   */
+  const trail = async (slug: string): Promise<NoteTrail | null> => {
+    const db = need();
+    const note = db.db.prepare("SELECT type FROM notes WHERE slug = ?").get(slug);
+    if (!note) return null;
+    if (slug === ROOT_HUB) return { trail: [], inHub: String(note.type) === "hub" };
+
+    const linkers = db.db.prepare(
+      `SELECT l.from_slug, l.to_slug, l.ord, n.title
+       FROM links l JOIN notes n ON n.slug = l.from_slug
+       WHERE n.type = 'hub' AND l.to_slug IN (SELECT value FROM json_each(?))`,
+    );
+    const found = new Map<string, { title: string; links: Array<{ to: string; ord: number }> }>();
+    const reached = new Set([slug]);
+    for (let level = [slug]; level.length > 0; ) {
+      const next: string[] = [];
+      for (const r of linkers.all(JSON.stringify(level))) {
+        const from = String(r.from_slug);
+        let hub = found.get(from);
+        if (!hub) found.set(from, (hub = { title: String(r.title), links: [] }));
+        hub.links.push({ to: String(r.to_slug), ord: Number(r.ord) });
+        if (!reached.has(from)) {
+          reached.add(from);
+          if (from !== ROOT_HUB) next.push(from);
+        }
+      }
+      level = next;
+    }
+
+    const hubs = new Map<string, HubLinks>();
+    for (const [hubSlug, hub] of found) {
+      hubs.set(hubSlug, { title: hub.title, links: hub.links.sort((a, b) => a.ord - b.ord).map((l) => l.to) });
+    }
+    return findTrail(hubs, slug);
+  };
+
+  const isMentioned = async (absolutePath: string): Promise<boolean> => {
+    const db = need();
+    if (!checkDrivePath(absolutePath).ok) return false;
+    return db.db.prepare("SELECT 1 FROM mentions WHERE key = ? LIMIT 1").get(pathKey(absolutePath)) !== undefined;
+  };
+
+  const hubMembership = async (): Promise<HubMembershipReport> => {
+    const db = need();
+    const rows = db.db
+      .prepare(
+        `SELECT n.slug, h.slug AS hub
+         FROM notes n
+         LEFT JOIN links l ON l.to_slug = n.slug
+         LEFT JOIN notes h ON h.slug = l.from_slug AND h.type = 'hub'
+         WHERE n.type = 'note'
+         ORDER BY n.slug, h.slug`,
+      )
+      .all();
+    const hubsOf = new Map<string, string[]>();
+    for (const r of rows) {
+      const slug = String(r.slug);
+      const listed = hubsOf.get(slug) ?? [];
+      if (r.hub !== null && r.hub !== undefined) listed.push(String(r.hub));
+      hubsOf.set(slug, listed);
+    }
+    const report: HubMembershipReport = { notesWithoutHub: [], notesInSeveralHubs: [] };
+    for (const [slug, hubs] of hubsOf) {
+      if (hubs.length === 0) report.notesWithoutHub.push({ slug });
+      else if (hubs.length > 1) report.notesInSeveralHubs.push({ slug, hubs });
+    }
+    return report;
+  };
+
   const invalid = async (): Promise<InvalidNote[]> => {
     const db = need();
     return db.db
@@ -334,6 +416,9 @@ export function createIndex(opts: IndexOptions): LocalSearchIndex {
     recordInvalid,
     search,
     backlinks,
+    trail,
+    isMentioned,
+    hubMembership,
     invalid,
     stats,
   };

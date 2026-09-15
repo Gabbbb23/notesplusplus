@@ -12,7 +12,8 @@
  *   tags.yml             tag registry: list of { name, description }
  *   .git                 auto-committed on every write
  *
- * A slug is unique across notes/ and sources/. Wikilinks are [[slug]] or [[slug|label]].
+ * A slug is unique across notes/ and sources/. Links are [[slug]] or [[slug|label]]; src/core/graph/note-body.ts
+ * decides what a body links to and mentions.
  */
 
 export type NoteType = "note" | "hub" | "source";
@@ -54,8 +55,13 @@ export interface Note extends NoteSummary {
   body: string;
   /** Full file contents as on disk. */
   raw: string;
-  /** Outgoing wikilink targets (slugs), deduplicated, in order of first appearance. */
+  /** Outgoing link targets (slugs), deduplicated, in order of first appearance. Never from code. */
   links: string[];
+  /**
+   * Mentions: drive-letter absolute paths the body writes as inline code outside a markdown link, exactly as written,
+   * deduplicated, in order of first appearance. The web view gives these spans View, Open, and Show in folder.
+   */
+  mentions: string[];
   /** File modification time, used for the write-conflict check. */
   mtimeMs: number;
 }
@@ -96,12 +102,27 @@ export interface FileEntry {
   ext: string;
 }
 
-export interface LinkReport {
+/** The problems `NoteStore.checkLinks` finds by reading every note file. */
+export interface StoreLinkReport {
   brokenLinks: Array<{ from: string; to: string }>;
   missingFiles: Array<{ from: string; file: string }>;
   missingSources: Array<{ from: string; source: string }>;
   invalidNotes: InvalidNote[];
 }
+
+/**
+ * Hub membership, read from the index. Conventions put every note of type `note` in exactly one hub, so only those
+ * are checked: hubs (the root hub included) and sources are never reported. A hub lists a note when its body links to
+ * it; the root hub counts as a hub.
+ */
+export interface HubMembershipReport {
+  /** Notes of type `note` that no hub links to, sorted by slug. */
+  notesWithoutHub: Array<{ slug: string }>;
+  /** Notes of type `note` that two or more hubs link to, sorted by slug, each with those hubs sorted by slug. */
+  notesInSeveralHubs: Array<{ slug: string; hubs: string[] }>;
+}
+
+export interface LinkReport extends StoreLinkReport, HubMembershipReport {}
 
 /** One hub in a note's breadcrumb trail. */
 export interface TrailHub {
@@ -219,7 +240,7 @@ export interface NoteStore {
   /** Absolute path for a brain-relative path, refusing anything outside the root. */
   resolve(relativePath: string): string;
 
-  checkLinks(): Promise<LinkReport>;
+  checkLinks(): Promise<StoreLinkReport>;
 }
 
 export type SearchMode = "hybrid" | "keyword" | "semantic";
@@ -259,8 +280,9 @@ export interface IndexStats {
 
 /**
  * The search index. A rebuildable SQLite cache over the store: FTS5 for keywords,
- * local embeddings for semantic search, link table for backlinks.
- * Never writes to the brain repo.
+ * local embeddings for semantic search, and the note graph (links in body order, mentions) for backlinks, trails,
+ * hub membership, and the open-file allowlist. Never writes to the brain repo, and never reads note files after
+ * `upsertNote` or `rebuild` has been given them.
  */
 export interface SearchIndex {
   open(): Promise<void>;
@@ -276,6 +298,11 @@ export interface SearchIndex {
 
   search(query: string, opts?: SearchOptions): Promise<SearchResult[]>;
   backlinks(slug: string): Promise<NoteSummary[]>;
+  /** See `Brain.trail`. */
+  trail(slug: string): Promise<NoteTrail | null>;
+  /** See `Brain.isMentioned`. */
+  isMentioned(absolutePath: string): Promise<boolean>;
+  hubMembership(): Promise<HubMembershipReport>;
   invalid(): Promise<InvalidNote[]>;
   stats(): Promise<Omit<IndexStats, "durationMs">>;
 }
@@ -317,6 +344,16 @@ export interface Brain {
 
   search(query: string, opts?: SearchOptions): Promise<SearchResult[]>;
   backlinks(slug: string): Promise<NoteSummary[]>;
+  /**
+   * Where a note or source sits under the root hub, answered from the index without reading note files. Null when
+   * the index holds no note with that slug. A hand edit on disk shows up only after reindex.
+   */
+  trail(slug: string): Promise<NoteTrail | null>;
+  /**
+   * Whether some note mentions this drive-letter absolute path, ignoring case, slash style, and a trailing separator
+   * (`pathKey` in src/core/graph/drive-path.ts). One indexed lookup; reads no note files.
+   */
+  isMentioned(absolutePath: string): Promise<boolean>;
 
   tags(): Promise<Tag[]>;
   createTag(tag: Tag, meta: WriteMeta): Promise<Tag>;
@@ -326,6 +363,7 @@ export interface Brain {
   inboxAdd(name: string, content: string): Promise<InboxItem>;
 
   files(): Promise<FileEntry[]>;
+  /** Broken links, missing files and sources, and invalid notes from the files on disk; hub membership from the index. */
   checkLinks(): Promise<LinkReport>;
   stats(): Promise<Omit<IndexStats, "durationMs">>;
 }

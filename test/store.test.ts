@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { simpleGit } from "simple-git";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createStore, extractLinks, isValidSlug, rewriteLinks, slugify, today } from "../src/core/store/index.ts";
+import { createStore, isValidSlug, slugify, today } from "../src/core/store/index.ts";
 import { parseFrontmatter, serializeNote, SUMMARY_MAX_CHARS, validateFrontmatter } from "../src/core/store/frontmatter.ts";
 import { createIndex } from "../src/core/index/index.ts";
 import { BrainError, ConflictError, NotFoundError, ValidationError, type Note, type NoteStore } from "../src/core/types.ts";
@@ -85,7 +85,7 @@ describe("init", () => {
   });
 });
 
-describe("slug and links helpers", () => {
+describe("slug helpers", () => {
   it("slugify normalizes titles", () => {
     expect(slugify("Ryzen Laptop Specs")).toBe("ryzen-laptop-specs");
     expect(slugify("  Café -- crème brûlée!  ")).toBe("cafe-creme-brulee");
@@ -95,23 +95,6 @@ describe("slug and links helpers", () => {
     expect(isValidSlug("-a")).toBe(false);
     expect(isValidSlug("a--b")).toBe(false);
     expect(isValidSlug("A")).toBe(false);
-  });
-
-  it("extractLinks dedupes, trims, and skips code", () => {
-    const body = [
-      "See [[alpha]] and [[ beta |Beta label]] then [[alpha]] again.",
-      "Inline `[[not-this]]` and [[gamma|x]].",
-      "```",
-      "[[nor-this]]",
-      "```",
-      "[[delta]]",
-    ].join("\n");
-    expect(extractLinks(body)).toEqual(["alpha", "beta", "gamma", "delta"]);
-  });
-
-  it("rewriteLinks keeps labels and code untouched", () => {
-    const body = "[[old]] [[old|Label]] [[older]] `[[old]]`\n```\n[[old]]\n```\n";
-    expect(rewriteLinks(body, "old", "new")).toBe("[[new]] [[new|Label]] [[older]] `[[old]]`\n```\n[[old]]\n```\n");
   });
 });
 
@@ -279,10 +262,14 @@ describe("write", () => {
 });
 
 describe("get and list", () => {
-  it("get returns links and null for missing", async () => {
-    await store.write({ slug: "a", frontmatter: { title: "A", type: "note", summary: "s", tags: [] }, body: "[[b]] [[c|C]] [[b]]" }, meta);
+  it("get returns links, mentions, and null for missing", async () => {
+    await store.write(
+      { slug: "a", frontmatter: { title: "A", type: "note", summary: "s", tags: [] }, body: "[[b]] [[c|C]] [[b]] `C:\\Files\\a.pdf`" },
+      meta,
+    );
     const a = await store.get("a");
     expect(a?.links).toEqual(["b", "c"]);
+    expect(a?.mentions).toEqual(["C:\\Files\\a.pdf"]);
     expect(a?.frontmatter.title).toBe("A");
     expect(await store.get("missing")).toBeNull();
     expect(await store.get("../etc")).toBeNull();

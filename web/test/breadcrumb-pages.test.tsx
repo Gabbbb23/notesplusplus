@@ -25,6 +25,7 @@ function note(slug: string, title: string, tags: string[], type: Note["type"] = 
     body: "Body text.",
     raw: "",
     links: [],
+    mentions: [],
     mtimeMs: 0,
   };
 }
@@ -198,7 +199,7 @@ describe("other pages", () => {
       "/api/files": () => reply(200, []),
       "/api/inbox": () => reply(200, []),
       "/api/check-links": () =>
-        reply(200, { brokenLinks: [], missingFiles: [], missingSources: [], invalidNotes: [] }),
+        reply(200, { brokenLinks: [], missingFiles: [], missingSources: [], invalidNotes: [], notesWithoutHub: [], notesInSeveralHubs: [] }),
     });
     renderAt(path);
 

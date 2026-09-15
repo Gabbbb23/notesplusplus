@@ -1,7 +1,7 @@
 import type { Element, ElementContent } from "hast";
 import { MessageSquareWarningIcon } from "lucide-react";
 import { Children, cloneElement, isValidElement, useMemo, type CSSProperties, type ReactElement, type ReactNode } from "react";
-import ReactMarkdown, { type Components } from "react-markdown";
+import ReactMarkdown, { type Components, type Options } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   ResponsiveTable,
@@ -17,11 +17,12 @@ import { FileLink } from "@/components/file-actions";
 import { Notice } from "@/components/notice";
 import { SectionHeading } from "@/components/section-heading";
 import { TextLink } from "@/components/text-link";
-import { isExternalHref, replaceWikilinks, safeHref } from "@/lib/markdown";
+import { isExternalHref, safeHref } from "@/lib/markdown";
 import { CALLOUTS, isCalloutKind, rehypeCallouts } from "@/lib/rehype-callouts";
 import { rehypeLocalPaths } from "@/lib/rehype-local-paths";
 import { rehypeTableCellText } from "@/lib/rehype-table-cell-text";
 import { rehypeTableLabels } from "@/lib/rehype-table-labels";
+import { remarkWikilinks } from "@/lib/remark-wikilinks";
 
 /** GFM column alignment arrives as an inline text-align style; map it onto the shared cell's align. */
 function alignOf(style: CSSProperties | undefined): CellAlign | undefined {
@@ -75,8 +76,8 @@ const components: Components = {
       </TextLink>
     );
   },
-  // Inline code holding an absolute Windows path (marked by rehype-local-paths.ts) becomes the
-  // path plus View, Open, and Show in folder. Other code, fenced blocks included, is unchanged.
+  // Inline code holding one of the note's mentions (marked by rehype-local-paths.ts) becomes the
+  // path plus View, Open, and Show in folder. Other code, code blocks included, is unchanged.
   code(props) {
     const { children, node: _node, ...rest } = props;
     const localPath = (props as { "data-local-path"?: string })["data-local-path"];
@@ -140,24 +141,30 @@ const components: Components = {
   },
 };
 
-const remarkPlugins = [remarkGfm];
-// rehypeLocalPaths reads code text before rehypeTableCellText rewrites the text in table cells.
-const rehypePlugins = [rehypeLocalPaths, rehypeTableLabels, rehypeTableCellText, rehypeCallouts];
+// remarkWikilinks runs on the tree remark-gfm builds, so a table's cells are split before it looks for links.
+const remarkPlugins = [remarkGfm, remarkWikilinks];
 
 /**
- * A note body: markdown with GFM, wikilinks turned into router links,
+ * A note body: markdown with GFM, wikilinks in text (never in code) turned into router links,
  * raw HTML shown as text (react-markdown's default), unsafe hrefs dropped,
- * links through TextLink, h2 through SectionHeading, inline code holding a local file path
- * through FileLink, tables through the shared responsive table with the cell text step
+ * links through TextLink, h2 through SectionHeading, inline code holding one of the note's
+ * `mentions` through FileLink, tables through the shared responsive table with the cell text step
  * from rehype-table-cell-text.ts, fenced mermaid blocks through Diagram, and GitHub alert
  * callouts through Notice.
+ *
+ * `mentions` comes from the server's note (`Note.mentions`); pass `[]` for markdown that is not a
+ * note body. Only those spans get file actions, because only those paths will open.
  */
-export function NoteBody({ markdown }: { markdown: string }) {
-  const source = useMemo(() => replaceWikilinks(markdown), [markdown]);
+export function NoteBody({ markdown, mentions }: { markdown: string; mentions: readonly string[] }) {
+  // rehypeLocalPaths reads code text before rehypeTableCellText rewrites the text in table cells.
+  const rehypePlugins = useMemo<Options["rehypePlugins"]>(
+    () => [[rehypeLocalPaths, { mentions }], rehypeTableLabels, rehypeTableCellText, rehypeCallouts],
+    [mentions],
+  );
   return (
     <div className="prose-note">
       <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components}>
-        {source}
+        {markdown}
       </ReactMarkdown>
     </div>
   );

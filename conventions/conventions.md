@@ -41,6 +41,8 @@ Lowercase `a-z0-9`, words separated by single hyphens: `ryzen-laptop-specs`, not
 
 `[[slug]]` or `[[slug|label]]`. The target must be an existing slug in `notes/` or `sources/`. A link to a slug that does not exist shows up in `check_links` as broken. Search before linking if you are unsure a note exists.
 
+A link counts only in plain text. Inside inline code (any number of backticks) or a code block (fenced with ```` ``` ```` or `~~~`, or indented four spaces) it is just text: no backlink, no hub listing, and `rename_note` leaves it alone. In a table cell, escape the label's pipe, `[[slug\|label]]`, or the table splits the cell there. Do not put markup inside a label (`[[slug|*label*]]` is not a link).
+
 ## The three note types
 
 **note**: one topic, atomic. The title is a claim or a noun phrase: "Vitest runs test files serially by default" or "Ryzen 7 7735HS laptop specs". If you are writing "and" into a title, it is two notes.
@@ -70,7 +72,7 @@ Tags are few and broad: `hardware`, `health`, `work`, `recipes`. They group whol
 - Keep it self-contained. A reader who lands on it from search must not need another note to understand it.
 - Name specific things: dates, numbers, names, versions, prices, file names. "Upgraded to Node 24 on 2026-09-01" beats "recently upgraded Node".
 - Several small notes beat one long one. Search returns notes; a long note buries the fact in the snippet.
-- When a note mentions a file outside the brain, write its full Windows path in backticks with nothing else inside them: `` `C:\Important Files\College Files\...\Module 1.pdf` ``. The web view turns that into View, Open, and Show in folder buttons. The server opens only paths that some note mentions this way, so a path written as plain text, or inside a fenced code block, gets no buttons.
+- When a note mentions a file outside the brain, write its full Windows path in backticks with nothing else inside them: `` `C:\Important Files\College Files\...\Module 1.pdf` ``. The web view turns that into View, Open, and Show in folder buttons. The server opens only paths that some note mentions this way, so a path written as plain text, inside a code block, or inside a markdown link gets no buttons, and neither does a path with a `..` segment or a network path (`\\server\share`).
 - End with a `## Related` section holding wikilinks to neighbouring notes and to the source.
 
 Example body:
@@ -107,7 +109,7 @@ No raw HTML, no images of tables, no ASCII-art diagrams.
 
 ## Hub maintenance
 
-When you add a note, add a line for it to its domain hub. When you rename one, `rename_note` fixes the link but check the hub's one-liner still reads right. When a note belongs to a domain that has no hub, create the hub (type `hub`, tagged with the domain tag) and add it to `index`. Every note should appear in exactly one hub.
+When you add a note, add a line for it to its domain hub. When you rename one, `rename_note` fixes the link but check the hub's one-liner still reads right. When a note belongs to a domain that has no hub, create the hub (type `hub`, tagged with the domain tag) and add it to `index`. Every note of type `note` should appear in exactly one hub; `check_links` lists the notes no hub links to and the notes more than one hub links to. Hubs and sources are not checked.
 
 ## Control
 

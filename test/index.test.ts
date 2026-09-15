@@ -77,6 +77,7 @@ function note(partial: Partial<Note> & { slug: string }): Note {
     body,
     raw: `---\ntitle: ${title}\n---\n${body}`,
     links: partial.links ?? [],
+    mentions: partial.mentions ?? [],
     mtimeMs: partial.mtimeMs ?? 1,
   };
 }

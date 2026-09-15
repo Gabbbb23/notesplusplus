@@ -108,6 +108,7 @@ describe("pages re-run the failed request and show the result", () => {
       body: "Body text.",
       raw: "",
       links: [],
+      mentions: [],
       mtimeMs: 0,
     };
     const fetchMock = stubApi({

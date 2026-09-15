@@ -72,7 +72,11 @@ Every control that acts on a file a note mentions. Apart from `lib/api.ts`, it i
   - Every control's accessible name includes the file name ("Open Module 1.pdf in its default app"). A button is disabled while its request runs, and the result shows as a toast.
 - `FileLink` (`path`, `name`, `code`) for a file named in running text: the path or name through `BreakableText`, then the compact `FileActions`. The actions follow the last line of the text and move below it as a group when they do not fit. `code` shows the text as code. The note header's Files, file search results, and local paths in note bodies use it.
 
-In a note body, `lib/rehype-local-paths.ts` marks inline code whose whole text is an absolute Windows path, and `note-body.tsx` renders it through `FileLink`, in lists and table cells alike. Fenced code blocks, other inline code, and code inside a link stay as they are.
+In a note body, `NoteBody` takes the note's `mentions` from the server, and `lib/rehype-local-paths.ts` marks the inline code whose text is one of them; `note-body.tsx` renders it through `FileLink`, in lists and table cells alike. The web has no path rule of its own: the server decides what a mention is and opens only those paths, so a button never leads to a refusal. Code blocks, other inline code (a path the server does not list included), and code inside a link stay as they are. Pass `mentions={[]}` for markdown that is not a note body.
+
+## Wikilinks
+
+`lib/remark-wikilinks.ts` turns `[[slug]]` and `[[slug|label]]` into links to `/notes/slug`, rendered through `TextLink`. It works on the syntax tree that `remark-gfm` builds and looks only in text, so nothing inside inline code (any number of backticks), a ```` ``` ```` or `~~~` fence, an indented code block, or a markdown link's text becomes a link. The server reads links with the same rule, so every rendered link is one the server counts for backlinks, trails, and hub membership. In a table cell the label's pipe must be escaped (`[[slug\|label]]`), or GFM splits the cell there.
 
 ## badges.tsx
 
@@ -92,7 +96,7 @@ Every card, all on one shell (16px padding, 8px radius, hairline border). It is 
 
 - `ItemCard` for one thing in a list: a title (`to` for an app route, `href` for a new tab, or neither for plain text when the meta row carries a `FileLink`), then optional badge, summary, snippet, and meta row.
 - `CardList` stacks cards with the standard gap.
-- `SectionCard` for a titled block with an optional count, such as a Check section or the Inbox form.
+- `SectionCard` for a titled block with an optional count, such as a Check section or the Inbox form. The Check page has one per list in `GET /api/check-links`: broken links, missing files, missing sources, invalid notes, notes no hub lists, and notes listed by more than one hub (each with links to those hubs).
 - `StatCard` for a number with a label on Home.
 - `LoadingCards` for card-shaped placeholders.
 

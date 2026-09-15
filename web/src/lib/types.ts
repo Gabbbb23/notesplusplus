@@ -40,8 +40,13 @@ export interface Note extends NoteSummary {
   body: string;
   /** Full file contents as on disk. */
   raw: string;
-  /** Outgoing wikilink targets (slugs), deduplicated, in order of first appearance. */
+  /** Outgoing link targets (slugs), deduplicated, in order of first appearance. Never from code. */
   links: string[];
+  /**
+   * Absolute paths the body writes as inline code outside a link, exactly as written, deduplicated, in body order.
+   * NoteBody gives exactly these spans View, Open, and Show in folder.
+   */
+  mentions: string[];
   /** File modification time, used for the write-conflict check. */
   mtimeMs: number;
 }
@@ -97,6 +102,10 @@ export interface LinkReport {
   missingFiles: Array<{ from: string; file: string }>;
   missingSources: Array<{ from: string; source: string }>;
   invalidNotes: InvalidNote[];
+  /** Notes of type note that no hub links to, sorted by slug. Hubs and sources are never listed. */
+  notesWithoutHub: Array<{ slug: string }>;
+  /** Notes of type note that two or more hubs link to, sorted by slug, with those hubs. */
+  notesInSeveralHubs: Array<{ slug: string; hubs: string[] }>;
 }
 
 /** One hub in a note's breadcrumb trail. */

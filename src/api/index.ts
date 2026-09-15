@@ -24,7 +24,6 @@ import {
 import { fileResponse } from "./file-response.ts";
 import { createLauncher, type Launcher } from "./launcher.ts";
 import { isOpenable, resolveAllowedPath } from "./local-paths.ts";
-import { noteTrail } from "./trail.ts";
 
 export interface ApiOptions {
   /** Folder holding conventions.md, file.md, and garden.md. */
@@ -255,7 +254,12 @@ export function createApi(brain: Brain, opts: ApiOptions): Hono {
   });
 
   // `:slug` matches one path segment, so /api/notes/:slug above never captures this route.
-  app.get("/api/notes/:slug/trail", async (c) => c.json(await noteTrail(brain, c.req.param("slug"))));
+  app.get("/api/notes/:slug/trail", async (c) => {
+    const slug = c.req.param("slug");
+    const trail = await brain.trail(slug);
+    if (!trail) throw new NotFoundError(`note ${slug}`);
+    return c.json(trail);
+  });
 
   // ---- search ----
 
@@ -312,7 +316,7 @@ export function createApi(brain: Brain, opts: ApiOptions): Hono {
     return fileResponse(c, abs, stat.size);
   });
 
-  // Files outside the brain, allowed when a note mentions them. See local-paths.ts for the rules.
+  // Files outside the brain, allowed when a note mentions them (Brain.isMentioned). See local-paths.ts.
   app.get("/api/local-file", async (c) => {
     const requested = c.req.query("path");
     if (requested === undefined) throw new ValidationError("path is required");

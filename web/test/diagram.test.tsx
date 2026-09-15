@@ -33,7 +33,7 @@ const fence = (lang: string, body: string) => "```" + lang + "\n" + body + "\n``
 function renderNote(markdown: string) {
   return render(
     <MemoryRouter>
-      <NoteBody markdown={markdown} />
+      <NoteBody markdown={markdown} mentions={[]} />
     </MemoryRouter>,
   );
 }
@@ -148,7 +148,7 @@ describe("<Diagram> in a note body", () => {
     const { container } = render(
       <StrictMode>
         <MemoryRouter>
-          <NoteBody markdown={note(fence("mermaid", TIMELINE), fence("mermaid", "pie\n  \"Tuition\" : 3200\n  \"Fees\" : 2445"))} />
+          <NoteBody markdown={note(fence("mermaid", TIMELINE), fence("mermaid", "pie\n  \"Tuition\" : 3200\n  \"Fees\" : 2445"))} mentions={[]} />
         </MemoryRouter>
       </StrictMode>,
     );
@@ -173,7 +173,7 @@ describe("<Diagram> in a note body", () => {
 
     view.rerender(
       <MemoryRouter>
-        <NoteBody markdown={fence("mermaid", "timeline\n  2026 : new")} />
+        <NoteBody markdown={fence("mermaid", "timeline\n  2026 : new")} mentions={[]} />
       </MemoryRouter>,
     );
     await act(async () => finishFirst({ svg: "" }));

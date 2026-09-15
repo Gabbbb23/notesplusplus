@@ -1,25 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { escapeHtml, isExternalHref, markSnippet, replaceWikilinks, safeHref, splitSnippet } from "../src/lib/markdown";
-
-describe("replaceWikilinks", () => {
-  it("converts [[slug]] and [[slug|label]] to /notes links", () => {
-    expect(replaceWikilinks("See [[foo]] and [[bar|Bar label]].")).toBe(
-      "See [foo](/notes/foo) and [Bar label](/notes/bar).",
-    );
-  });
-
-  it("leaves fenced code and inline code alone", () => {
-    const md = "```\n[[in-fence]]\n```\n\nInline `[[in-code]]` stays, [[after]] goes.";
-    const out = replaceWikilinks(md);
-    expect(out).toContain("[[in-fence]]");
-    expect(out).toContain("`[[in-code]]`");
-    expect(out).toContain("[after](/notes/after)");
-  });
-
-  it("URL-encodes the slug", () => {
-    expect(replaceWikilinks("[[a b]]")).toBe("[a b](/notes/a%20b)");
-  });
-});
+import { escapeHtml, isExternalHref, markSnippet, safeHref, splitSnippet } from "../src/lib/markdown";
 
 describe("markSnippet", () => {
   it("escapes HTML first, then wraps «» in <mark>", () => {

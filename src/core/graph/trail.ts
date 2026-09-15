@@ -1,14 +1,14 @@
 /**
- * Breadcrumb trails. Notes live in one flat folder; structure comes from hub notes. The root hub `index` links
- * domain hubs, which may link sub-hubs, which link notes. A note's trail is the chain of hubs from `index` down to
- * the hub that links to it. Conventions put every note in exactly one hub, but nothing enforces that, so the
- * search copes with notes listed twice, hubs that link each other, and notes no hub reaches.
+ * Trails. Notes live in one flat folder; structure comes from hubs. The root hub `index` links domain hubs, which may
+ * link sub-hubs, which link notes. A note's trail is the chain of hubs from `index` down to the hub that links to it.
+ * Conventions put every note in exactly one hub, but nothing enforces that, so the search copes with notes listed
+ * twice, hubs that link each other, and notes no hub reaches.
  */
-import { NotFoundError, type Brain, type NoteTrail, type TrailHub } from "../core/types.ts";
+import type { NoteTrail, TrailHub } from "../types.ts";
 
 export const ROOT_HUB = "index";
 
-/** A hub's title and its outgoing wikilink targets in order of first appearance. */
+/** A hub's title and its outgoing link targets in order of first appearance. */
 export interface HubLinks {
   title: string;
   links: readonly string[];
@@ -19,6 +19,11 @@ export interface HubLinks {
  * The shortest chain wins. On a tie the hub dequeued first wins, which follows link order in each body.
  * Each hub is visited once, so hubs that link each other cannot loop. Links to slugs that are not in `hubs`,
  * including slugs that do not exist, are never followed. The caller checks that `slug` itself exists.
+ *
+ * `hubs` may hold only `index` and the hubs with a chain of links to `slug` that does not pass through `index`, each
+ * with its links among those hubs and to `slug`. A hub that discovers one of them is itself one of them or `index`
+ * (a shortest chain from `index` never returns to it), and the hub that finds `slug` links to it directly, so those
+ * hubs leave the queue in the same relative order as in the search over every hub, and the answer is the same.
  */
 export function findTrail(hubs: ReadonlyMap<string, HubLinks>, slug: string): NoteTrail {
   if (!hubs.has(ROOT_HUB)) return { trail: [], inHub: false };
@@ -45,16 +50,4 @@ function chainTo(hub: string, parent: ReadonlyMap<string, string | null>, hubs: 
     out.push({ slug: at, title: hubs.get(at)!.title });
   }
   return out.reverse();
-}
-
-/** The trail for an existing note or source, read fresh from every hub. Throws NotFoundError for an unknown slug. */
-export async function noteTrail(brain: Brain, slug: string): Promise<NoteTrail> {
-  if (!(await brain.get(slug))) throw new NotFoundError(`note ${slug}`);
-  const summaries = await brain.list({ type: "hub" });
-  const notes = await Promise.all(summaries.map((s) => brain.get(s.slug)));
-  const hubs = new Map<string, HubLinks>();
-  for (const hub of notes) {
-    if (hub) hubs.set(hub.slug, { title: hub.title, links: hub.links });
-  }
-  return findTrail(hubs, slug);
 }

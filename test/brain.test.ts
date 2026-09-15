@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { BrainImpl } from "../src/core/brain.ts";
 import { createIndex } from "../src/core/index/index.ts";
 import { createStore, serializeNote } from "../src/core/store/index.ts";
@@ -24,6 +24,13 @@ import { TempBrain } from "./helpers/temp-brain.ts";
 const meta = { tool: "test" };
 
 const note = (slug: string, title: string, body: string) => ({ slug, frontmatter: { title, type: "note" as const, summary: "s", tags: [] }, body });
+/** A hub titled with its slug in upper case, listing `links` one per line. */
+const hub = (slug: string, links: string[], extra = "") => ({
+  slug,
+  frontmatter: { title: slug.toUpperCase(), type: "hub" as const, summary: "s", tags: [] },
+  body: `${links.map((l) => `- [[${l}]]`).join("\n")}\n${extra}`,
+});
+const crumb = (slug: string) => ({ slug, title: slug.toUpperCase() });
 const ids = (results: Array<{ id: string }>) => results.map((r) => r.id);
 const slugs = (notes: Array<{ slug: string }>) => notes.map((n) => n.slug);
 
@@ -105,6 +112,228 @@ describe("BrainImpl keeps the index in step with every write", () => {
   });
 });
 
+describe("BrainImpl trail", () => {
+  // Every test gets its own copy of an empty brain, so hubs from one tree never reach another.
+  let base: TempBrain;
+  let tb: TempBrain;
+  let brain: Brain;
+
+  beforeAll(async () => {
+    base = await TempBrain.create();
+  });
+
+  beforeEach(async () => {
+    tb = await base.copy();
+    brain = tb.brain;
+  });
+
+  afterEach(async () => {
+    await tb.dispose();
+  });
+
+  afterAll(async () => {
+    await base.dispose();
+  });
+
+  it("follows hub writes, a hub rename, and a hub delete, and reports orphans and unknown slugs", async () => {
+    await brain.write(note("rizal-day", "RIZAL-DAY", "December 30."), meta);
+    await brain.write(hub("ge09", ["rizal-day"]), meta);
+    await brain.write(hub("college", ["ge09"]), meta);
+    await brain.write(note("stray", "STRAY", "No hub lists this."), meta);
+    expect(await brain.trail("rizal-day")).toEqual({ trail: [], inHub: false });
+
+    await brain.write(hub("index", ["college"]), meta);
+    expect(await brain.trail("rizal-day")).toEqual({ trail: [crumb("index"), crumb("college"), crumb("ge09")], inHub: true });
+    expect(await brain.trail("stray")).toEqual({ trail: [], inHub: false });
+    expect(await brain.trail("nope")).toBeNull();
+
+    await brain.rename("ge09", "ge09-rizal", meta);
+    expect(await brain.trail("rizal-day")).toEqual({
+      trail: [crumb("index"), crumb("college"), { slug: "ge09-rizal", title: "GE09" }],
+      inHub: true,
+    });
+    expect(await brain.trail("ge09")).toBeNull();
+
+    await brain.delete("college", meta);
+    expect(await brain.trail("rizal-day")).toEqual({ trail: [], inHub: false });
+    expect(await brain.trail("ge09-rizal")).toEqual({ trail: [], inHub: false });
+  });
+
+  it("lists every hub from the root down to the one that links the note or source", async () => {
+    await tb.writeNotes([
+      hub("index", ["fields", "college"]),
+      hub("college", ["ge09"]),
+      hub("ge09", ["rizal-day", "ge09-transcript"]),
+      hub("fields", ["org-chart"]),
+      note("rizal-day", "Rizal Day", ""),
+      note("org-chart", "Org chart", ""),
+      { slug: "ge09-transcript", frontmatter: { title: "Transcript", type: "source", summary: "s", tags: [] }, body: "" },
+    ]);
+    const nested = { trail: [crumb("index"), crumb("college"), crumb("ge09")], inHub: true };
+    expect(await brain.trail("rizal-day")).toEqual(nested);
+    expect(await brain.trail("ge09-transcript")).toEqual(nested);
+    expect(await brain.trail("ge09")).toEqual({ trail: [crumb("index"), crumb("college")], inHub: true });
+    expect(await brain.trail("org-chart")).toEqual({ trail: [crumb("index"), crumb("fields")], inHub: true });
+  });
+
+  it("prefers the shallower hub when hubs at different depths list the note", async () => {
+    // The deeper hub is linked first, so a depth-first search would pick it.
+    await tb.writeNotes([hub("index", ["college", "fields"]), hub("college", ["ge09"]), hub("ge09", ["shared"]), hub("fields", ["shared"]), note("shared", "Shared", "")]);
+    expect(await brain.trail("shared")).toEqual({ trail: [crumb("index"), crumb("fields")], inHub: true });
+  });
+
+  it("prefers the hub linked first when hubs at the same depth list the note, by link order in the body", async () => {
+    await tb.writeNotes([hub("index", ["fields", "college"]), hub("college", ["shared"]), hub("fields", ["shared"]), note("shared", "Shared", "")]);
+    expect(await brain.trail("shared")).toEqual({ trail: [crumb("index"), crumb("fields")], inHub: true });
+
+    await brain.write(hub("index", ["college", "fields"]), meta);
+    expect(await brain.trail("shared")).toEqual({ trail: [crumb("index"), crumb("college")], inHub: true });
+  });
+
+  it("breaks a tie a level down by the order of the hubs above, not by position in the parent", async () => {
+    // Both sub-hubs sit at depth 2. a-sub is the first link in a, b-sub the second in b, but index links b before a,
+    // so b-sub leaves the queue first.
+    await tb.writeNotes([
+      hub("index", ["b", "a"]),
+      hub("a", ["a-sub"]),
+      hub("b", ["x", "b-sub"]),
+      hub("a-sub", ["deep"]),
+      hub("b-sub", ["deep"]),
+      note("x", "X", ""),
+      note("deep", "Deep", ""),
+    ]);
+    expect(await brain.trail("deep")).toEqual({ trail: [crumb("index"), crumb("b"), crumb("b-sub")], inHub: true });
+  });
+
+  it("stops on hubs that link each other", async () => {
+    await tb.writeNotes([hub("index", ["a"]), hub("a", ["b", "index"]), hub("b", ["a", "b", "note"]), note("orphan", "Orphan", ""), note("note", "Note", "")]);
+    expect(await brain.trail("orphan")).toEqual({ trail: [], inHub: false });
+    expect(await brain.trail("note")).toEqual({ trail: [crumb("index"), crumb("a"), crumb("b")], inHub: true });
+    expect(await brain.trail("a")).toEqual({ trail: [crumb("index")], inHub: true });
+  });
+
+  it("does not follow links from a non-hub note or to slugs that do not exist", async () => {
+    await tb.writeNotes([
+      hub("index", ["specs", "missing", "college"]),
+      hub("college", []),
+      note("specs", "Specs", "From [[transcript]]."),
+      note("transcript", "Transcript", ""),
+    ]);
+    expect(await brain.trail("transcript")).toEqual({ trail: [], inHub: false });
+    expect(await brain.trail("specs")).toEqual({ trail: [crumb("index")], inHub: true });
+    expect(await brain.trail("missing")).toBeNull();
+  });
+
+  it("gives the root an empty trail, and every note none once the root hub is gone from disk and reindexed", async () => {
+    await tb.writeNotes([hub("index", ["college"]), hub("college", ["ge09", "index"]), hub("ge09", ["rizal-day"]), note("rizal-day", "Rizal Day", "")]);
+    expect(await brain.trail("index")).toEqual({ trail: [], inHub: true });
+
+    // The store refuses to delete the root hub, but the file can still go missing on disk.
+    await fs.rm(path.join(tb.root, "notes", "index.md"));
+    // Until a reindex, the index still answers from what it last saw.
+    expect(await brain.trail("rizal-day")).toEqual({ trail: [crumb("index"), crumb("college"), crumb("ge09")], inHub: true });
+    await brain.reindex();
+    expect(await brain.trail("rizal-day")).toEqual({ trail: [], inHub: false });
+    expect(await brain.trail("index")).toBeNull();
+  });
+});
+
+describe("BrainImpl mentions and hub membership", () => {
+  let tb: TempBrain;
+  let brain: Brain;
+  const MODULE = String.raw`C:\College Files\Ethics\Module 1.pdf`;
+
+  beforeEach(async () => {
+    tb = await TempBrain.create();
+    brain = tb.brain;
+  });
+
+  afterEach(async () => {
+    await tb.dispose();
+  });
+
+  it("allows a mentioned path after the write that adds it and refuses it after the write that removes it", async () => {
+    expect(await brain.isMentioned(MODULE)).toBe(false);
+    await brain.write(note("ethics", "Ethics", `Module 1 is \`${MODULE}\`.`), meta);
+
+    expect(await brain.isMentioned(MODULE)).toBe(true);
+    // Case, slash style, and a trailing separator do not matter.
+    expect(await brain.isMentioned("c:/college files/ETHICS/module 1.pdf")).toBe(true);
+    expect(await brain.isMentioned(`${MODULE}\\`)).toBe(true);
+    expect(await brain.isMentioned(String.raw`C:\College Files\Ethics\Module 2.pdf`)).toBe(false);
+    // A mentioned folder does not allow the files inside it, and a path that only normalizes onto a mention is refused.
+    expect(await brain.isMentioned(String.raw`C:\College Files\Ethics`)).toBe(false);
+    expect(await brain.isMentioned(String.raw`C:\College Files\Other\..\Ethics\Module 1.pdf`)).toBe(false);
+
+    await brain.write(note("ethics", "Ethics", `Module 1 is gone. \`\`${String.raw`D:\Videos\Lecture 3.mp4`}\`\``), meta);
+    expect(await brain.isMentioned(MODULE)).toBe(false);
+    expect(await brain.isMentioned(String.raw`d:\videos\lecture 3.mp4`)).toBe(true);
+  });
+
+  it("keeps mentions current through rename, delete, inbox take, and reindex", async () => {
+    await brain.write(note("first", "First", `\`${MODULE}\``), meta);
+    await brain.write(note("second", "Second", `Also \`${MODULE}\``), meta);
+
+    await brain.rename("first", "renamed", meta);
+    expect((await brain.get("renamed"))?.mentions).toEqual([MODULE]);
+    await brain.delete("second", meta);
+    expect(await brain.isMentioned(MODULE)).toBe(true);
+    await brain.delete("renamed", meta);
+    expect(await brain.isMentioned(MODULE)).toBe(false);
+
+    await brain.inboxAdd("paths.md", "The syllabus is `C:\\College Files\\Syllabus.pdf`.");
+    await brain.inboxTake("paths.md", { title: "Paths", summary: "Where files are." }, meta);
+    expect(await brain.isMentioned(String.raw`C:\College Files\Syllabus.pdf`)).toBe(true);
+
+    // A note edited by hand counts only after a reindex.
+    await tb.writeNotes([note("by-hand", "By hand", `\`${MODULE}\``)]);
+    expect(await brain.isMentioned(MODULE)).toBe(true);
+  });
+
+  it("check_links reports notes that no hub lists and notes that several hubs list", async () => {
+    await tb.writeNotes([
+      hub("index", ["alpha-hub", "beta-hub"]),
+      hub("alpha-hub", ["in-one", "in-two", "beta-hub", "a-source"]),
+      hub("beta-hub", ["in-two", "alpha-hub"]),
+      note("in-none", "In none", "Linked only from a note: [[in-one]]."),
+      note("in-one", "In one", "Links to [[in-none]]."),
+      note("in-two", "In two", ""),
+      note("in-code", "In code", ""),
+      hub("unlisted-hub", [], "`[[in-code]]` stays code.\n\n~~~\n[[in-code]]\n~~~\n"),
+      { slug: "a-source", frontmatter: { title: "A source", type: "source", summary: "s", tags: [] }, body: "" },
+      { slug: "lone-source", frontmatter: { title: "Lone source", type: "source", summary: "s", tags: [] }, body: "" },
+    ]);
+    const report = await brain.checkLinks();
+    // Hubs (listed twice or not at all) and sources are exempt; a link from a plain note or from code does not list.
+    expect(report.notesWithoutHub).toEqual([{ slug: "in-code" }, { slug: "in-none" }]);
+    expect(report.notesInSeveralHubs).toEqual([{ slug: "in-two", hubs: ["alpha-hub", "beta-hub"] }]);
+
+    await brain.write(hub("beta-hub", ["alpha-hub", "in-none"]), meta);
+    const after = await brain.checkLinks();
+    expect(after.notesWithoutHub).toEqual([{ slug: "in-code" }]);
+    expect(after.notesInSeveralHubs).toEqual([]);
+    expect(after).toMatchObject({ brokenLinks: [], missingFiles: [], missingSources: [], invalidNotes: [] });
+  });
+
+  it("rename rewrites real links and leaves [[old]] inside code as written", async () => {
+    await tb.writeNotes([
+      note("okapi", "Okapi", "Forest giraffe."),
+      note(
+        "zoo",
+        "Zoo",
+        ["See [[okapi]] and [[okapi|the okapi]].", "Inline `[[okapi]]` and ``[[okapi]]``.", "~~~", "[[okapi]]", "~~~", "", "    [[okapi]]", ""].join("\n"),
+      ),
+    ]);
+    const result = await brain.rename("okapi", "forest-giraffe", meta);
+    expect(result.rewritten).toEqual(["zoo"]);
+    expect((await brain.get("zoo"))?.body).toBe(
+      ["See [[forest-giraffe]] and [[forest-giraffe|the okapi]].", "Inline `[[okapi]]` and ``[[okapi]]``.", "~~~", "[[okapi]]", "~~~", "", "    [[okapi]]", ""].join("\n"),
+    );
+    expect(await brain.checkLinks()).toMatchObject({ brokenLinks: [] });
+    expect(slugs(await brain.backlinks("forest-giraffe"))).toEqual(["zoo"]);
+  });
+});
+
 /** A second SearchIndex adapter: the real index, except that updates throw while `failing` is true. */
 class FlakyIndex implements SearchIndex {
   failing = false;
@@ -148,6 +377,15 @@ class FlakyIndex implements SearchIndex {
   }
   backlinks(slug: string) {
     return this.inner.backlinks(slug);
+  }
+  trail(slug: string) {
+    return this.inner.trail(slug);
+  }
+  isMentioned(absolutePath: string) {
+    return this.inner.isMentioned(absolutePath);
+  }
+  hubMembership() {
+    return this.inner.hubMembership();
   }
   invalid() {
     return this.inner.invalid();

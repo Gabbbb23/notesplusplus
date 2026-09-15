@@ -119,7 +119,8 @@ export function createMcpServer(client: BrainClient, opts: McpServerOptions): Mc
     "backlinks",
     {
       title: "Backlinks to a note",
-      description: "List the notes that link to a slug. Use it to find surrounding context, and to check for orphans when gardening.",
+      description:
+        "List the notes that link to a slug. Use it to find surrounding context. To find notes no hub lists, read check_links instead of calling this for every note.",
       inputSchema: { slug: z.string().describe("The target slug.") },
       annotations: { readOnlyHint: true },
     },
@@ -283,7 +284,8 @@ export function createMcpServer(client: BrainClient, opts: McpServerOptions): Mc
     "check_links",
     {
       title: "Check links and files",
-      description: "Report broken wikilinks, missing attachments, missing sources, and files that fail to parse. Run it after filing or gardening and fix everything it lists.",
+      description:
+        "Report broken wikilinks, missing attachments, missing sources, files that fail to parse, notes of type note that no hub lists, and notes listed by more than one hub. Run it after filing or gardening and fix everything it lists.",
       annotations: { readOnlyHint: true },
     },
     guard(async () => text(formatLinkReport(await client.checkLinks()))),
@@ -407,6 +409,14 @@ export function formatLinkReport(report: LinkReport): string {
   if (report.invalidNotes.length > 0) {
     lines.push("Invalid notes:");
     for (const i of report.invalidNotes) lines.push(`  ${i.path}: ${i.error}`);
+  }
+  if (report.notesWithoutHub.length > 0) {
+    lines.push("Notes no hub lists:");
+    for (const n of report.notesWithoutHub) lines.push(`  ${n.slug}`);
+  }
+  if (report.notesInSeveralHubs.length > 0) {
+    lines.push("Notes listed by more than one hub:");
+    for (const n of report.notesInSeveralHubs) lines.push(`  ${n.slug} <- ${n.hubs.join(", ")}`);
   }
   return lines.length === 0 ? "No problems." : lines.join("\n");
 }

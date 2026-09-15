@@ -199,9 +199,10 @@ describe("notes", () => {
   it("GET /api/notes/:slug returns the note or 404", async () => {
     const res = await app.request("/api/notes/ryzen-laptop-specs");
     expect(res.status).toBe(200);
-    const note = (await res.json()) as { slug: string; body: string; links: string[]; mtimeMs: number };
+    const note = (await res.json()) as { slug: string; body: string; links: string[]; mentions: string[]; mtimeMs: number };
     expect(note.slug).toBe("ryzen-laptop-specs");
     expect(note.links).toEqual(["laptop-transcript", "index"]);
+    expect(note.mentions).toEqual([]);
     expect(typeof note.mtimeMs).toBe("number");
 
     const missing = await app.request("/api/notes/nope");
@@ -368,6 +369,7 @@ describe("notes paging", () => {
 });
 
 describe("note trail", () => {
+  // The route answers from Brain.trail; test/brain.test.ts covers how a trail is chosen.
   // index -> college -> ge09-life-and-works-of-rizal -> rizal-day note and a source. ge09 links back to college.
   // laptop-transcript stays linked only from ryzen-laptop-specs, a plain note.
   const hub = (slug: string, title: string, body: string): NoteFixture => ({ slug, frontmatter: { title, type: "hub", summary: "s", tags: [] }, body });
@@ -411,17 +413,8 @@ describe("note trail", () => {
     expect(await trailOf("index")).toEqual({ status: 200, body: { trail: [], inHub: true } });
   });
 
-  it("GET /api/notes/:slug/trail reports a note no hub chain reaches, and every note once index is gone", async () => {
+  it("GET /api/notes/:slug/trail reports a note no hub chain reaches", async () => {
     expect(await trailOf("laptop-transcript")).toEqual({ status: 200, body: { trail: [], inHub: false } });
-    // The store refuses to delete the root hub, but the file can still go missing on disk.
-    const indexFile = path.join(root, "notes", "index.md");
-    const saved = fs.readFileSync(indexFile);
-    fs.rmSync(indexFile);
-    try {
-      expect(await trailOf("rizal-day-is-rizals-death-anniversary")).toEqual({ status: 200, body: { trail: [], inHub: false } });
-    } finally {
-      fs.writeFileSync(indexFile, saved);
-    }
   });
 
   it("GET /api/notes/:slug/trail returns 404 for an unknown slug, including one a hub links to", async () => {
@@ -840,26 +833,36 @@ describe("open and reveal (brain files)", () => {
 describe.runIf(process.platform === "win32")("files outside the brain", () => {
   let outside: string;
   let pdf: string;
+  const at = (name: string) => path.join(outside, name);
 
   sharedBrain(async (t) => {
     outside = fs.mkdtempSync(path.join(os.tmpdir(), "npp-outside-"));
-    pdf = path.join(outside, "Module 1.pdf");
+    pdf = at("Module 1.pdf");
     fs.writeFileSync(pdf, "%PDF module one");
-    fs.writeFileSync(path.join(outside, "Unmentioned.pdf"), "%PDF secret");
-    fs.writeFileSync(path.join(outside, "Fenced.pdf"), "%PDF fenced");
-    fs.writeFileSync(path.join(outside, "setup.exe"), "MZ");
-    fs.writeFileSync(path.join(outside, "Desktop.lnk"), "L");
+    for (const name of ["Unmentioned.pdf", "Fenced.pdf", "Tilde.pdf", "Indented.pdf", "Linked.pdf", "Double.pdf"]) {
+      fs.writeFileSync(at(name), `%PDF ${name}`);
+    }
+    fs.writeFileSync(at("setup.exe"), "MZ");
+    fs.writeFileSync(at("Desktop.lnk"), "L");
     await t.writeNotes([
       {
         slug: "ethics",
         frontmatter: { title: "Ethics", type: "note", summary: "s", tags: [] },
         body: [
           `Module 1 is at \`${pdf}\`.`,
-          `Folder: \`${outside}\`. Installer \`${path.join(outside, "setup.exe")}\`, shortcut \`${path.join(outside, "Desktop.lnk")}\`.`,
-          `Gone: \`${path.join(outside, "Missing.pdf")}\``,
+          `Folder: \`${outside}\`. Installer \`${at("setup.exe")}\`, shortcut \`${at("Desktop.lnk")}\`.`,
+          `Gone: \`${at("Missing.pdf")}\``,
+          `Double backticks count: \`\`${at("Double.pdf")}\`\`, and so does a repeat of \`${pdf}\`.`,
+          `A path inside a link does not: [\`${at("Linked.pdf")}\`](https://example.com).`,
           "```",
-          `\`${path.join(outside, "Fenced.pdf")}\``,
+          `\`${at("Fenced.pdf")}\``,
           "```",
+          "~~~",
+          `\`${at("Tilde.pdf")}\``,
+          "~~~",
+          "",
+          `    \`${at("Indented.pdf")}\``,
+          "",
         ].join("\n"),
       },
     ]);
@@ -871,6 +874,11 @@ describe.runIf(process.platform === "win32")("files outside the brain", () => {
 
   const localFile = (p: string, headers: Record<string, string> = {}) =>
     app.request(`/api/local-file?path=${encodeURIComponent(p)}`, { headers });
+
+  it("GET /api/notes/:slug lists the note's mentions as written, deduplicated, in body order", async () => {
+    const note = (await (await app.request("/api/notes/ethics")).json()) as { mentions: string[] };
+    expect(note.mentions).toEqual([pdf, outside, at("setup.exe"), at("Desktop.lnk"), at("Missing.pdf"), at("Double.pdf")]);
+  });
 
   it("GET /api/local-file serves a mentioned path given in another case and slash style", async () => {
     const res = await localFile(pdf.toUpperCase().replace(/\\/g, "/"));
@@ -884,9 +892,15 @@ describe.runIf(process.platform === "win32")("files outside the brain", () => {
     expect(await ranged.text()).toBe("%PDF");
   });
 
-  it("GET /api/local-file refuses unmentioned paths and paths mentioned only in a fenced block", async () => {
-    for (const name of ["Unmentioned.pdf", "Fenced.pdf"]) {
-      const res = await localFile(path.join(outside, name));
+  it("GET /api/local-file serves a path mentioned in double backticks", async () => {
+    const res = await localFile(at("Double.pdf"));
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("%PDF Double.pdf");
+  });
+
+  it("GET /api/local-file refuses unmentioned paths and paths written only in code blocks or inside a link", async () => {
+    for (const name of ["Unmentioned.pdf", "Fenced.pdf", "Tilde.pdf", "Indented.pdf", "Linked.pdf"]) {
+      const res = await localFile(at(name));
       expect(res.status, name).toBe(403);
       expect(await errorCode(res)).toBe("forbidden");
     }
@@ -902,7 +916,7 @@ describe.runIf(process.platform === "win32")("files outside the brain", () => {
     expect((await localFile(path.join(outside, "Missing.pdf"))).status).toBe(404);
     expect((await localFile(outside)).status).toBe(404);
     expect((await app.request("/api/local-file")).status).toBe(400);
-    for (const p of ["\\\\server\\share\\Module 1.pdf", `${pdf}:hidden`, "Module 1.pdf"]) {
+    for (const p of ["\\\\server\\share\\Module 1.pdf", `${pdf}:hidden`, "Module 1.pdf", path.join(outside, "Up") + "\\..\\Module 1.pdf"]) {
       expect((await localFile(p)).status, p).toBe(400);
     }
   });
@@ -913,15 +927,17 @@ describe.runIf(process.platform === "win32")("files outside the brain", () => {
     expect(await opened.json()).toEqual({ opened: pdf });
     expect((await app.request("/api/open", json({ path: outside }))).status).toBe(200);
 
-    for (const name of ["setup.exe", "Desktop.lnk"]) {
-      const res = await app.request("/api/open", json({ path: path.join(outside, name) }));
+    expect((await app.request("/api/open", json({ path: at("Double.pdf") }))).status).toBe(200);
+
+    for (const name of ["setup.exe", "Desktop.lnk", "Unmentioned.pdf", "Linked.pdf", "Indented.pdf"]) {
+      const res = await app.request("/api/open", json({ path: at(name) }));
       expect(res.status, name).toBe(403);
     }
-    expect((await app.request("/api/open", json({ path: path.join(outside, "Unmentioned.pdf") }))).status).toBe(403);
-    expect((await app.request("/api/open", json({ path: path.join(outside, "Missing.pdf") }))).status).toBe(404);
+    expect((await app.request("/api/open", json({ path: at("Missing.pdf") }))).status).toBe(404);
     expect(launched).toEqual([
       { action: "open", path: pdf },
       { action: "open", path: outside },
+      { action: "open", path: at("Double.pdf") },
     ]);
   });
 
@@ -931,7 +947,9 @@ describe.runIf(process.platform === "win32")("files outside the brain", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ revealed: exe });
     expect((await app.request("/api/reveal", json({ path: outside }))).status).toBe(200);
-    expect((await app.request("/api/reveal", json({ path: path.join(outside, "Fenced.pdf") }))).status).toBe(403);
+    for (const name of ["Fenced.pdf", "Tilde.pdf", "Linked.pdf"]) {
+      expect((await app.request("/api/reveal", json({ path: at(name) }))).status, name).toBe(403);
+    }
     expect(launched).toEqual([
       { action: "reveal", path: exe, isDirectory: false },
       { action: "reveal", path: outside, isDirectory: true },
@@ -942,7 +960,7 @@ describe.runIf(process.platform === "win32")("files outside the brain", () => {
 describe("maintenance", () => {
   sharedBrain();
 
-  it("GET /api/check-links returns a LinkReport", async () => {
+  it("GET /api/check-links returns a LinkReport with hub membership", async () => {
     await tb.writeNotes([
       {
         slug: "dangling",
@@ -957,6 +975,9 @@ describe("maintenance", () => {
       missingFiles: [{ from: "dangling", file: "files/missing.pdf" }],
       missingSources: [{ from: "dangling", source: "gone" }],
       invalidNotes: [],
+      // The root hub lists ryzen-laptop-specs; nothing lists dangling. Hubs and sources are never reported.
+      notesWithoutHub: [{ slug: "dangling" }],
+      notesInSeveralHubs: [],
     });
   });
 

@@ -9,12 +9,13 @@ Use this when the owner says "garden", "tidy up", or "clean the brain". Read `br
    - Missing file: check the `files/` listing for a moved or renamed file, fix the path in `files:`, or drop the entry.
    - Missing source: find the source's real slug and fix `sources:`; if the source is gone, remove the entry and say so in the report.
    - Invalid note: `get_note` it, read the error, rewrite it with valid frontmatter (all required fields, tags from `list_tags`).
+   - Note no hub lists, and note listed by more than one hub: handled in steps 3 and 4.
 
 2. **Find duplicates.** Open `index`, then each hub. For every note listed, `search` by its title and again by its summary. Two notes that make the same claim get merged: keep the note with the better slug as the survivor, fold the other's body and `sources` into it with `write_note`, check the other's `backlinks` and point those links at the survivor, then `delete_note` the other. When the better slug belongs to the note you are deleting, `rename_note` the survivor onto it afterwards; the rename rewrites links for you.
 
-3. **Find orphans.** For each note in `list_notes`, run `backlinks`. `list_notes` returns one page at a time; keep calling it with the offset its last line gives until that line no longer appears. A note with none is an orphan. Link it from its domain hub and, when there is a related note, from that note's Related section.
+3. **Link orphans.** Read "Notes no hub lists" from the `check_links` report; do not call `backlinks` note by note. Add each one to its domain hub with a one-line description and, when there is a related note, link it from that note's Related section. Run `backlinks` only on a note whose context you need.
 
-4. **Refresh hubs.** Every note of type `note` appears in exactly one domain hub with a current one-line description. Remove lines for deleted notes, add lines for missing ones, move a note that sits in two hubs to the one that fits. `index` lists every hub and nothing else.
+4. **Refresh hubs.** Every note of type `note` appears in exactly one domain hub with a current one-line description. For each note under "Notes listed by more than one hub", keep it in the hub that fits and remove its line from the others. Remove lines for deleted notes and rewrite one-liners that no longer match the note. `index` lists every hub and nothing else.
 
 5. **Tighten summaries.** Any summary that describes instead of answers ("notes about the laptop") gets rewritten to carry the fact. Open the note, rewrite the summary, `write_note` with `expectedMtimeMs`.
 

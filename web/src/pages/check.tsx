@@ -35,11 +35,17 @@ function Arrow() {
 }
 
 function Report({ r }: { r: LinkReport }) {
-  const total = r.brokenLinks.length + r.missingFiles.length + r.missingSources.length + r.invalidNotes.length;
+  const total =
+    r.brokenLinks.length +
+    r.missingFiles.length +
+    r.missingSources.length +
+    r.invalidNotes.length +
+    r.notesWithoutHub.length +
+    r.notesInSeveralHubs.length;
   if (total === 0) {
     return (
       <Notice tone="success" title="All clear">
-        No broken links, missing files, missing sources, or invalid notes.
+        No broken links, missing files, missing sources, or invalid notes, and every note is in exactly one hub.
       </Notice>
     );
   }
@@ -77,6 +83,27 @@ function Report({ r }: { r: LinkReport }) {
           <li key={i}>
             <BreakableText as="code" className="font-mono" text={n.path} />
             <span className="text-muted-foreground">: {n.error}</span>
+          </li>
+        ))}
+      </Section>
+      <Section title="Notes no hub lists" count={r.notesWithoutHub.length}>
+        {r.notesWithoutHub.map((n) => (
+          <li key={n.slug}>
+            <From slug={n.slug} />
+          </li>
+        ))}
+      </Section>
+      <Section title="Notes listed by more than one hub" count={r.notesInSeveralHubs.length}>
+        {r.notesInSeveralHubs.map((n) => (
+          <li key={n.slug}>
+            <From slug={n.slug} />
+            <span className="text-muted-foreground"> in </span>
+            {n.hubs.map((hub, i) => (
+              <span key={hub}>
+                {i > 0 && <span className="text-muted-foreground">, </span>}
+                <TextLink to={noteUrl(hub)}>{hub}</TextLink>
+              </span>
+            ))}
           </li>
         ))}
       </Section>
