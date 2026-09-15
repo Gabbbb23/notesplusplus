@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createStore, slugify, today } from "../src/core/store/index.ts";
 import { parseFrontmatter, serializeNote, SUMMARY_MAX_CHARS, validateFrontmatter } from "../src/core/store/frontmatter.ts";
 import { createIndex } from "../src/core/index/index.ts";
-import { BrainError, ConflictError, NotFoundError, ValidationError, type Note, type NoteStore } from "../src/core/types.ts";
+import { BrainError, ConflictError, NotFoundError, ValidationError, type Note, type NoteStore, type PinTarget } from "../src/core/types.ts";
 
 const meta = { tool: "test" };
 
@@ -545,6 +545,196 @@ describe("checkLinks", () => {
     expect(report.missingFiles).toEqual([{ from: "n", file: "files/absent.pdf" }]);
     expect(report.missingSources).toEqual([{ from: "n", source: "ghost-src" }]);
     expect(report.invalidNotes.map((i) => i.path)).toEqual(["notes/junk.md"]);
+  });
+});
+
+describe("pins", () => {
+  const HEADER = "# The owner's pins on Home and in the sidebar, in order. Set them with set_pin or the web UI; do not edit by hand.\n";
+  const none = { home: [], sidebar: [] };
+
+  /** Valid notes on disk, without commits. */
+  async function notesOnDisk(...slugs: string[]): Promise<void> {
+    const fm = { type: "note" as const, summary: "s", tags: [], created: "2026-09-15", updated: "2026-09-15" };
+    for (const slug of slugs) await writeFile(`notes/${slug}.md`, serializeNote({ ...fm, title: slug.toUpperCase() }, ""));
+  }
+
+  /** Whether pins.yml differs from the last commit. */
+  const pinsUncommitted = async () => (await simpleGit({ baseDir: root }).raw(["status", "--porcelain", "--", "pins.yml"])).trim() !== "";
+
+  it("reads a missing file as no pins, ignores unknown keys, keeps a repeated slug's first place, and lists pins with no note", async () => {
+    expect(await fileExists("pins.yml")).toBe(false);
+    expect(await store.pins()).toEqual(none);
+    expect(await store.checkLinks()).toMatchObject({ invalidNotes: [], missingPins: [] });
+
+    await notesOnDisk("alpha");
+    await writeFile("pins.yml", "home:\n  - gone\n  - alpha\n  - gone\ncolour: blue\nstarred: [zeta]\nsidebar:\n");
+    expect(await store.pins()).toEqual({ home: ["gone", "alpha"], sidebar: [] });
+    expect(await store.checkLinks()).toMatchObject({ invalidNotes: [], missingPins: ["gone"] });
+
+    await writeFile("pins.yml", "sidebar: [zulu, alpha, gone]\nhome: [gone]\n");
+    expect((await store.checkLinks()).missingPins).toEqual(["gone", "zulu"]);
+
+    await writeFile("pins.yml", "# nothing pinned\n");
+    expect(await store.pins()).toEqual(none);
+  });
+
+  it("reads a malformed file as no pins, and checkLinks reports it", async () => {
+    const cases: Array<[string, string | RegExp]> = [
+      ["home: [unclosed\n", /^not valid YAML: .+; pins read as none until it is fixed$/],
+      ["- alpha\n- beta\n", "must be a mapping with home and sidebar lists; pins read as none until it is fixed"],
+      ["home: alpha\n", "home must be a list of slugs; pins read as none until it is fixed"],
+      ["home: [alpha]\nsidebar: [Not A Slug, 7]\n", 'sidebar holds entries that are not slugs: "Not A Slug", 7; pins read as none until it is fixed'],
+    ];
+    for (const [content, error] of cases) {
+      await writeFile("pins.yml", content);
+      expect(await store.pins(), content).toEqual(none);
+      const report = await store.checkLinks();
+      expect(report.invalidNotes, content).toEqual([{ path: "pins.yml", error: typeof error === "string" ? error : expect.stringMatching(error) }]);
+      expect(report.missingPins, content).toEqual([]);
+    }
+  });
+
+  it("setPin appends, keeps the place of a pinned slug, and unpins, with one commit per change and none otherwise", async () => {
+    await notesOnDisk("alpha", "beta", "gamma");
+    const before = (await commitMessages()).length;
+
+    expect(await store.setPin("beta", "home", true, meta)).toEqual({ home: ["beta"], sidebar: [] });
+    expect(await store.setPin("alpha", "home", true, { tool: "web" })).toEqual({ home: ["beta", "alpha"], sidebar: [] });
+    expect(await store.setPin("gamma", "sidebar", true, meta)).toEqual({ home: ["beta", "alpha"], sidebar: ["gamma"] });
+    expect(await store.setPin("beta", "home", true, meta)).toEqual({ home: ["beta", "alpha"], sidebar: ["gamma"] });
+    expect(await store.setPin("beta", "home", false, { tool: "web" })).toEqual({ home: ["alpha"], sidebar: ["gamma"] });
+    expect(await store.setPin("beta", "sidebar", false, meta)).toEqual({ home: ["alpha"], sidebar: ["gamma"] });
+
+    expect(await commitMessages()).toHaveLength(before + 4);
+    expect((await commitMessages()).slice(0, 4)).toEqual([
+      "web: unpin beta from home",
+      "test: pin gamma to sidebar",
+      "web: pin alpha to home",
+      "test: pin beta to home",
+    ]);
+    expect(await readFile("pins.yml")).toBe(`${HEADER}home:\n  - alpha\nsidebar:\n  - gamma\n`);
+    expect(await pinsUncommitted()).toBe(false);
+    expect(await store.pins()).toEqual({ home: ["alpha"], sidebar: ["gamma"] });
+  });
+
+  it("setPin refuses an unknown slug, a bad slug or target, and a pin past the limit of each target", async () => {
+    await expect(store.setPin("nope", "home", true, meta)).rejects.toThrow(new NotFoundError("note nope"));
+    await expect(store.setPin("Bad Slug", "home", true, meta)).rejects.toThrow(ValidationError);
+    await expect(store.setPin("index", "top" as PinTarget, true, meta)).rejects.toThrow("target must be one of home, sidebar");
+
+    const fifty = Array.from({ length: 50 }, (_, i) => `note-${i + 1}`);
+    await notesOnDisk(...fifty, "one-more");
+    await writeFile("pins.yml", `home:\n${fifty.map((s) => `  - ${s}\n`).join("")}`);
+    const before = (await commitMessages()).length;
+
+    await expect(store.setPin("one-more", "home", true, meta)).rejects.toThrow(
+      new ValidationError("home already holds 50 pins, the most it can hold. Unpin one first."),
+    );
+    expect((await store.pins()).home).toEqual(fifty);
+    expect((await store.setPin("one-more", "sidebar", true, meta)).sidebar).toEqual(["one-more"]);
+    expect((await store.setPin("note-1", "home", false, meta)).home).toHaveLength(49);
+    expect((await store.setPin("one-more", "home", true, meta)).home).toEqual([...fifty.slice(1), "one-more"]);
+    expect(await commitMessages()).toHaveLength(before + 3);
+  });
+
+  it("a pin change replaces a malformed file, and unpinning leaves it alone", async () => {
+    await notesOnDisk("alpha");
+    await writeFile("pins.yml", "home: [unclosed\n");
+    expect(await store.setPin("alpha", "home", false, meta)).toEqual(none);
+    expect(await readFile("pins.yml")).toBe("home: [unclosed\n");
+    expect(await store.setPin("alpha", "home", true, meta)).toEqual({ home: ["alpha"], sidebar: [] });
+    expect(await readFile("pins.yml")).toBe(`${HEADER}home:\n  - alpha\nsidebar: []\n`);
+  });
+
+  it("reorderPins takes the pinned slugs in a new order and refuses any other list", async () => {
+    await notesOnDisk("a", "b", "c", "d");
+    await writeFile("pins.yml", "home: [a, b, c]\nsidebar: [d]\n");
+    const before = (await commitMessages()).length;
+
+    expect(await store.reorderPins("home", ["c", "a", "b"], { tool: "web" })).toEqual({ home: ["c", "a", "b"], sidebar: ["d"] });
+    expect((await commitMessages())[0]).toBe("web: reorder home pins");
+    expect(await pinsUncommitted()).toBe(false);
+    // The same order changes nothing and commits nothing.
+    expect(await store.reorderPins("home", ["c", "a", "b"], meta)).toEqual({ home: ["c", "a", "b"], sidebar: ["d"] });
+
+    const refused: Array<[string[], string]> = [
+      [["c", "a"], "missing: b"],
+      [[], "missing: c, a, b"],
+      [["c", "a", "b", "d"], "not pinned to home: d"],
+      [["c", "a", "b", "a"], "repeated: a"],
+      [["b", "x", "c", "x"], "missing: a; not pinned to home: x; repeated: x"],
+    ];
+    for (const [slugs, detail] of refused) {
+      await expect(store.reorderPins("home", slugs, meta), slugs.join()).rejects.toThrow(
+        new ValidationError(`slugs must hold every slug pinned to home, each once (${detail})`),
+      );
+    }
+    await expect(store.reorderPins("top" as PinTarget, [], meta)).rejects.toThrow("target must be one of home, sidebar");
+    expect(await store.pins()).toEqual({ home: ["c", "a", "b"], sidebar: ["d"] });
+    expect(await commitMessages()).toHaveLength(before + 1);
+  });
+
+  it("reorderPins lets a caller leave out a pinned slug with no note, which moves to the end", async () => {
+    await notesOnDisk("a", "b");
+    await writeFile("notes/broken.md", "no frontmatter\n");
+    await writeFile("pins.yml", "home: [gone, a, broken, b]\n");
+    expect(await store.reorderPins("home", ["b", "a"], meta)).toEqual({ home: ["b", "a", "gone", "broken"], sidebar: [] });
+    expect(await store.reorderPins("home", ["gone", "a", "b", "broken"], meta)).toEqual({ home: ["gone", "a", "b", "broken"], sidebar: [] });
+  });
+
+  it("rename moves a pin to the new slug and delete drops it, each inside the note's own commit", async () => {
+    const write = (slug: string) => store.write({ slug, frontmatter: { title: slug, type: "note", summary: "s", tags: [] }, body: "" }, meta);
+    for (const slug of ["okapi", "zebra", "plain"]) await write(slug);
+    await store.setPin("okapi", "home", true, meta);
+    await store.setPin("zebra", "home", true, meta);
+    await store.setPin("okapi", "sidebar", true, meta);
+    const before = (await commitMessages()).length;
+    const changedIn = async (rev: string) =>
+      (await simpleGit({ baseDir: root }).raw(["show", "--name-only", "--no-renames", "--format=", rev])).trim().split("\n").sort();
+
+    await store.rename("okapi", "forest-giraffe", meta);
+    expect(await store.pins()).toEqual({ home: ["forest-giraffe", "zebra"], sidebar: ["forest-giraffe"] });
+    expect(await changedIn("HEAD")).toEqual(["notes/forest-giraffe.md", "notes/okapi.md", "pins.yml"]);
+
+    await store.delete("forest-giraffe", meta);
+    expect(await store.pins()).toEqual({ home: ["zebra"], sidebar: [] });
+    expect(await changedIn("HEAD")).toEqual(["notes/forest-giraffe.md", "pins.yml"]);
+
+    // A note nothing pins leaves pins.yml out of its commits.
+    await store.rename("plain", "plainer", meta);
+    await store.delete("plainer", meta);
+    expect(await changedIn("HEAD~1")).toEqual(["notes/plain.md", "notes/plainer.md"]);
+    expect(await changedIn("HEAD")).toEqual(["notes/plainer.md"]);
+
+    expect((await commitMessages()).slice(0, 4)).toEqual([
+      "test: delete plainer",
+      "test: rename plain -> plainer",
+      "test: delete forest-giraffe",
+      "test: rename okapi -> forest-giraffe",
+    ]);
+    expect(await commitMessages()).toHaveLength(before + 4);
+    expect((await simpleGit({ baseDir: root }).status()).isClean()).toBe(true);
+  });
+
+  it("rename onto a slug a hand edit already pinned keeps the first place, and a malformed file stays as it is", async () => {
+    const write = (slug: string) => store.write({ slug, frontmatter: { title: slug, type: "note", summary: "s", tags: [] }, body: "" }, meta);
+    await write("okapi");
+    await write("zebra");
+    await writeFile("pins.yml", "home: [forest-giraffe, zebra, okapi]\n");
+    await store.rename("okapi", "forest-giraffe", meta);
+    expect(await store.pins()).toEqual({ home: ["forest-giraffe", "zebra"], sidebar: [] });
+
+    await writeFile("pins.yml", "home: [zebra\n");
+    await store.delete("zebra", meta);
+    expect(await readFile("pins.yml")).toBe("home: [zebra\n");
+  });
+
+  it("summaries returns valid notes in the order asked, once each, and skips the rest", async () => {
+    await notesOnDisk("alpha", "beta");
+    await writeFile("notes/broken.md", "no frontmatter\n");
+    const found = await store.summaries(["beta", "gone", "alpha", "broken", "beta", "Not A Slug"]);
+    expect(found.map((n) => n.slug)).toEqual(["beta", "alpha"]);
+    expect(found[1]).toEqual({ slug: "alpha", path: "notes/alpha.md", title: "ALPHA", type: "note", summary: "s", tags: [], created: "2026-09-15", updated: "2026-09-15" });
   });
 });
 

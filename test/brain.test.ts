@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { BrainImpl } from "../src/core/brain.ts";
 import { createIndex } from "../src/core/index/index.ts";
-import { createStore, serializeNote } from "../src/core/store/index.ts";
+import { createStore, serializeNote, today } from "../src/core/store/index.ts";
 import {
   ValidationError,
   type Brain,
@@ -12,6 +12,7 @@ import {
   type InvalidNote,
   type Note,
   type NoteStore,
+  type PinnedNotes,
   type SearchIndex,
   type SearchOptions,
 } from "../src/core/types.ts";
@@ -331,6 +332,61 @@ describe("BrainImpl mentions and hub membership", () => {
     );
     expect(await brain.checkLinks()).toMatchObject({ brokenLinks: [] });
     expect(slugs(await brain.backlinks("forest-giraffe"))).toEqual(["zoo"]);
+  });
+});
+
+describe("BrainImpl pins", () => {
+  let tb: TempBrain;
+  let brain: Brain;
+  const pinSlugs = (pins: PinnedNotes) => ({ home: slugs(pins.home), sidebar: slugs(pins.sidebar) });
+
+  beforeEach(async () => {
+    tb = await TempBrain.create();
+    brain = tb.brain;
+    await tb.writeNotes([note("okapi", "Okapi", "Forest giraffe."), note("zebra", "Zebra", "Stripes."), hub("animals", ["okapi", "zebra"])]);
+  });
+
+  afterEach(async () => {
+    await tb.dispose();
+  });
+
+  it("answers with the pinned notes in pin order, carries a pin through a rename, and drops it on delete", async () => {
+    await brain.setPin("zebra", "home", true, meta);
+    await brain.setPin("okapi", "home", true, meta);
+    const pinned = await brain.setPin("animals", "sidebar", true, meta);
+    expect(pinSlugs(pinned)).toEqual({ home: ["zebra", "okapi"], sidebar: ["animals"] });
+    expect(pinned.home[1]).toEqual({ slug: "okapi", path: "notes/okapi.md", title: "Okapi", type: "note", summary: "s", tags: [], created: today(), updated: today() });
+    expect(await brain.pins()).toEqual(pinned);
+
+    await brain.setPin("okapi", "sidebar", true, meta);
+    await brain.rename("okapi", "forest-giraffe", meta);
+    const renamed = await brain.pins();
+    expect(pinSlugs(renamed)).toEqual({ home: ["zebra", "forest-giraffe"], sidebar: ["animals", "forest-giraffe"] });
+    expect(renamed.home[1]).toMatchObject({ slug: "forest-giraffe", path: "notes/forest-giraffe.md", title: "Okapi" });
+
+    await brain.delete("forest-giraffe", meta);
+    expect(pinSlugs(await brain.pins())).toEqual({ home: ["zebra"], sidebar: ["animals"] });
+    expect((await brain.checkLinks()).missingPins).toEqual([]);
+
+    expect(pinSlugs(await brain.reorderPins("sidebar", ["animals"], meta))).toEqual({ home: ["zebra"], sidebar: ["animals"] });
+  });
+
+  it("leaves out a pinned note removed by hand without unpinning it, and checkLinks reports it as missingPins", async () => {
+    await brain.setPin("okapi", "home", true, meta);
+    await brain.setPin("zebra", "home", true, meta);
+    await brain.setPin("okapi", "sidebar", true, meta);
+
+    await fs.rm(path.join(tb.root, "notes", "okapi.md"));
+    // Pins read the note files, not the index, so no reindex is needed.
+    expect(await brain.pins()).toEqual({ home: [expect.objectContaining({ slug: "zebra" })], sidebar: [] });
+    expect(await fs.readFile(path.join(tb.root, "pins.yml"), "utf8")).toContain("okapi");
+    expect((await brain.checkLinks()).missingPins).toEqual(["okapi"]);
+
+    // The web UI never saw it, so a reorder may leave it out.
+    expect(pinSlugs(await brain.reorderPins("home", ["zebra"], meta))).toEqual({ home: ["zebra"], sidebar: [] });
+    await brain.setPin("okapi", "home", false, meta);
+    await brain.setPin("okapi", "sidebar", false, meta);
+    expect((await brain.checkLinks()).missingPins).toEqual([]);
   });
 });
 

@@ -16,6 +16,7 @@ import {
   noteListLimitSchema,
   noteTypeSchema,
   offsetSchema,
+  pinTargetSchema,
   requiredText,
   searchLimitSchema,
   searchModeSchema,
@@ -101,14 +102,17 @@ export const noteSchema = noteSummarySchema.extend({
   links: z.array(z.string()),
   /**
    * Mentions: drive-letter absolute paths the body writes as inline code outside a markdown link, exactly as written,
-   * deduplicated, in order of first appearance. The web view gives these spans View, Open, and Show in folder.
+   * deduplicated, in order of first appearance. The web view gives these spans Open and Show in folder.
    */
   mentions: z.array(z.string()),
   /** File modification time, used for the write-conflict check. */
   mtimeMs: z.number(),
 });
 
-/** A file on disk under notes/ or sources/ that failed to parse or validate. Indexed loosely, reported, never crashed on. */
+/**
+ * A file on disk under notes/ or sources/ that failed to parse or validate. Indexed loosely, reported, never crashed on.
+ * check-links also reports a malformed pins.yml this way.
+ */
 export const invalidNoteSchema = z.strictObject({
   path: z.string(),
   error: z.string(),
@@ -178,6 +182,19 @@ export const noteTrailSchema = z.strictObject({
   /** False when no chain of hubs from `index` reaches the note, or `index` does not exist. */
   inHub: z.boolean(),
 });
+
+/**
+ * `GET /api/notes/:slug/export.md`: the note file's bytes exactly as stored, frontmatter included, sent as
+ * `attachment; filename="<slug>.md"`.
+ */
+export const MARKDOWN_EXPORT_TYPE = "text/markdown; charset=utf-8";
+
+/**
+ * `GET /api/notes/:slug/export.pdf`: the web UI's print page for the note, printed to A4 by headless Microsoft Edge,
+ * sent as an attachment named by `pdfExportFileName`. Fails with 503 pdf_unavailable, 504 export_timeout, or 500
+ * export_failed.
+ */
+export const PDF_EXPORT_TYPE = "application/pdf";
 
 // ---- search ----------------------------------------------------------------------------------------------------
 
@@ -259,6 +276,38 @@ export const createTagInputSchema = z.object({
   description: z.string(),
 });
 
+// ---- pins ------------------------------------------------------------------------------------------------------
+
+/** What pins.yml holds: each target's pinned slugs, in the owner's order, each at most once. */
+export const pinListsSchema = z.strictObject({
+  home: z.array(z.string()),
+  sidebar: z.array(z.string()),
+});
+
+/**
+ * `GET /api/pins`, and the answer to every pin change: the pinned notes in pin order. A pinned slug with no note, or
+ * whose file does not parse, is left out here and stays in pins.yml; check-links lists it in `missingPins`.
+ */
+export const pinnedNotesSchema = z.strictObject({
+  home: z.array(noteSummarySchema),
+  sidebar: z.array(noteSummarySchema),
+});
+
+/** `PUT /api/pins/:target` with `{ slug, pinned }`, the target taken from the path. */
+export const setPinInputSchema = z.object({
+  target: pinTargetSchema,
+  slug: slugSchema,
+  /** True appends the slug to the target's list, or keeps its place when already pinned. False removes it. */
+  pinned: z.boolean(),
+});
+
+/** `PUT /api/pins/:target/order` with `{ slugs }`, the target taken from the path. */
+export const reorderPinsInputSchema = z.object({
+  target: pinTargetSchema,
+  /** Every slug pinned to the target, each once, in the new order. Slugs with no note may be left out. */
+  slugs: z.array(slugSchema),
+});
+
 // ---- inbox -----------------------------------------------------------------------------------------------------
 
 export const inboxItemSchema = z.strictObject({
@@ -308,12 +357,7 @@ export const fileEntrySchema = z.strictObject({
   ext: z.string(),
 });
 
-/** `GET /api/local-file?path=`. Which paths are allowed is src/api/local-paths.ts's call. */
-export const localFileQuerySchema = z.object({
-  path: z.string({ error: "path is required" }),
-});
-
-/** `POST /api/open` and `POST /api/reveal`. */
+/** `POST /api/open` and `POST /api/reveal`. Which paths are allowed is src/api/local-paths.ts's call. */
 export const pathInputSchema = z.object({
   path: z.string(),
 });
@@ -323,12 +367,15 @@ export const revealResultSchema = z.strictObject({ revealed: z.string() });
 
 // ---- maintenance -----------------------------------------------------------------------------------------------
 
-/** The problems `NoteStore.checkLinks` finds by reading every note file. */
+/** The problems `NoteStore.checkLinks` finds by reading every note file and pins.yml. */
 export const storeLinkReportSchema = z.strictObject({
   brokenLinks: z.array(z.strictObject({ from: z.string(), to: z.string() })),
   missingFiles: z.array(z.strictObject({ from: z.string(), file: z.string() })),
   missingSources: z.array(z.strictObject({ from: z.string(), source: z.string() })),
+  /** Also holds `{ path: "pins.yml", error }` when pins.yml is malformed and reads as no pins. */
   invalidNotes: z.array(invalidNoteSchema),
+  /** Pinned slugs with no valid note, from either target, each once, sorted. */
+  missingPins: z.array(z.string()),
 });
 
 /**
@@ -368,7 +415,8 @@ export const healthSchema = z.strictObject({
 
 /**
  * `error.code` values. The status comes from `BrainError.status`: 400 validation, 403 forbidden, 404 not_found,
- * 409 conflict, 415 unsupported_media_type, 416 range_not_satisfiable, 422 invalid_note, 500 io, git, and internal.
+ * 409 conflict, 415 unsupported_media_type, 416 range_not_satisfiable, 422 invalid_note, 500 io, git, export_failed,
+ * and internal, 503 pdf_unavailable, 504 export_timeout.
  */
 export const ERROR_CODES = [
   "validation",
@@ -380,7 +428,10 @@ export const ERROR_CODES = [
   "invalid_note",
   "io",
   "git",
+  "export_failed",
   "internal",
+  "pdf_unavailable",
+  "export_timeout",
 ] as const;
 
 /** The body of every JSON error response. */

@@ -27,10 +27,12 @@ src/
     index/           SearchIndex: SQLite (node:sqlite) with FTS5, local embeddings, links table, file text extraction
     brain.ts         Brain facade composing store + index
   api/               Hono REST routes over Brain. JSON in, JSON out. Also serves files for viewing and opens
-                     them in their default app or File Explorer (local-paths.ts holds the rules, launcher.ts the launch).
+                     them in their default app or File Explorer (local-paths.ts holds the rules, launcher.ts the launch),
+                     and exports notes as markdown or PDF (pdf-export.ts prints the web print page with headless Edge).
   mcp/               MCP stdio server. Thin HTTP client of the REST API. Serves conventions + prompts.
   cli/               init-brain, reindex
-  server.ts          entry: api + static web UI from web/dist (SPA fallback for non-/api routes)
+  app.ts             the HTTP app: api + static web UI from web/dist (SPA fallback for non-/api routes)
+  server.ts          entry: opens the brain and serves app.ts on 127.0.0.1 and ::1
   mcp.ts             entry: mcp stdio
 conventions/
   conventions.md     how the store is organized. Served by MCP as a resource and by REST at /api/conventions.
@@ -53,6 +55,7 @@ web/                 React + Vite + Tailwind + shadcn UI. Own package.json; read
   files/**             attachments
   inbox/**             new material dropped by the owner
   tags.yml             [{ name, description }]
+  pins.yml             { home: [slug], sidebar: [slug] }, the owner's pins in order
   .git
 ```
 

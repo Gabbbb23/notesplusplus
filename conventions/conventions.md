@@ -10,6 +10,7 @@ sources/<slug>.md    type: source. Raw material kept verbatim under a frontmatte
 files/**             attachments (pdf, docx, pptx, xlsx, images). Referenced from notes via `files:`.
 inbox/**             material the owner dropped for you. Empty it with the `file` prompt.
 tags.yml             the tag registry. Every tag a note uses must be listed here.
+pins.yml             the owner's shortcuts on Home and in the sidebar. Set through set_pin when the owner asks; never edit by hand.
 ```
 
 Slugs are unique across `notes/` and `sources/`. One slug, one file.
@@ -72,7 +73,7 @@ Tags are few and broad: `hardware`, `health`, `work`, `recipes`. They group whol
 - Keep it self-contained. A reader who lands on it from search must not need another note to understand it.
 - Name specific things: dates, numbers, names, versions, prices, file names. "Upgraded to Node 24 on 2026-09-01" beats "recently upgraded Node".
 - Several small notes beat one long one. Search returns notes; a long note buries the fact in the snippet.
-- When a note mentions a file outside the brain, write its full Windows path in backticks with nothing else inside them: `` `C:\Important Files\College Files\...\Module 1.pdf` ``. The web view turns that into View, Open, and Show in folder buttons. The server opens only paths that some note mentions this way, so a path written as plain text, inside a code block, or inside a markdown link gets no buttons, and neither does a path with a `..` segment or a network path (`\\server\share`).
+- When a note mentions a file outside the brain, write its full Windows path in backticks with nothing else inside them: `` `C:\Important Files\College Files\...\Module 1.pdf` ``. The web view turns that into Open and Show in folder buttons. The server opens only paths that some note mentions this way, so a path written as plain text, inside a code block, or inside a markdown link gets no buttons, and neither does a path with a `..` segment or a network path (`\\server\share`).
 - End with a `## Related` section holding wikilinks to neighbouring notes and to the source.
 
 Example body:

@@ -18,6 +18,8 @@ import type {
   NoteListOptions,
   NotePage,
   NoteSummary,
+  PinnedNotes,
+  PinTarget,
   RenameResult,
   SearchOptions,
   SearchPage,
@@ -85,6 +87,14 @@ export class BrainClient {
 
   createTag(tag: Tag): Promise<Tag> {
     return this.request("POST", "/api/tags", { body: tag });
+  }
+
+  pins(): Promise<PinnedNotes> {
+    return this.request("GET", "/api/pins");
+  }
+
+  setPin(slug: string, target: PinTarget, pinned: boolean): Promise<PinnedNotes> {
+    return this.request("PUT", `/api/pins/${encodeURIComponent(target)}`, { body: { slug, pinned } });
   }
 
   inboxList(): Promise<InboxItem[]> {

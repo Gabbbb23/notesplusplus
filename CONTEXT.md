@@ -58,6 +58,10 @@ _Avoid_: category, label
 A note's unique, lowercase, hyphenated name, used in links.
 _Avoid_: id, filename, key
 
+**Pin**:
+A shortcut the owner keeps to a note, hub, or source on Home or in the sidebar.
+_Avoid_: favorite, bookmark, star
+
 ## How notes relate
 
 **Link**:
@@ -69,7 +73,7 @@ A link seen from the note it points at: the notes that link here.
 _Avoid_: inbound reference, citation
 
 **Mention**:
-A full path to a document on the owner's laptop, written as inline code in a note, which the owner may view or open from that note.
+A full path to a document on the owner's laptop, written as inline code in a note, which the owner may open or show in its folder from that note.
 _Avoid_: file link, path reference
 
 **Trail**:

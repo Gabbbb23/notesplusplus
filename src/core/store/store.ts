@@ -18,13 +18,15 @@ import {
   type NoteStore,
   type NoteSummary,
   type NoteType,
+  type PinLists,
+  type PinTarget,
   type RenameResult,
   type StoreLinkReport,
   type Tag,
   type WriteMeta,
   type WriteNoteInput,
 } from "../types.ts";
-import { slugProblem } from "../contract/index.ts";
+import { PIN_TARGETS, PINS_MAX, pinLimitProblem, slugProblem } from "../contract/index.ts";
 import { parseNoteBody, rewriteLinks } from "../graph/note-body.ts";
 import { parseFrontmatter, serializeNote, summaryLengthProblem, validateFrontmatter } from "./frontmatter.ts";
 import { GitRepo } from "./git.ts";
@@ -35,6 +37,30 @@ const NOTE_DIRS = ["notes", "sources"] as const;
 const TAGS_FILE = "tags.yml";
 const TAGS_HEADER = "# Tag registry. One entry per tag:\n#   - name: hardware\n#     description: Laptops, parts, peripherals.\n";
 const ROOT_HUB_SLUG = "index";
+const PINS_FILE = "pins.yml";
+const PINS_HEADER =
+  "# The owner's pins on Home and in the sidebar, in order. Set them with set_pin or the web UI; do not edit by hand.\n";
+
+/** pins.yml as the store writes it: the header, then both lists, nothing else. */
+function serializePins(lists: PinLists): string {
+  return `${PINS_HEADER}${stringifyYaml({ home: lists.home, sidebar: lists.sidebar })}`;
+}
+
+const targetProblem = () => `target must be one of ${PIN_TARGETS.join(", ")}`;
+
+/** Only the NoteSummary fields of a note, for lists and pins. */
+function toSummary(note: NoteSummary): NoteSummary {
+  return {
+    slug: note.slug,
+    path: note.path,
+    title: note.title,
+    type: note.type,
+    summary: note.summary,
+    tags: note.tags,
+    created: note.created,
+    updated: note.updated,
+  };
+}
 
 /** Local calendar date as YYYY-MM-DD. */
 export function today(): string {
@@ -253,18 +279,25 @@ export class FileStore implements NoteStore {
       if ("error" in item) continue;
       if (filter.type && item.type !== filter.type) continue;
       if (filter.tag && !item.tags.includes(filter.tag)) continue;
-      out.push({
-        slug: item.slug,
-        path: item.path,
-        title: item.title,
-        type: item.type,
-        summary: item.summary,
-        tags: item.tags,
-        created: item.created,
-        updated: item.updated,
-      });
+      out.push(toSummary(item));
     }
     return out.sort(compareSummaries);
+  }
+
+  async summaries(slugs: string[]): Promise<NoteSummary[]> {
+    const found = await Promise.all(
+      [...new Set(slugs)].map(async (slug) => {
+        const rel = isValidSlug(slug) ? await io(() => this.locate(slug), `locate ${slug}`) : null;
+        if (!rel) return null;
+        try {
+          return toSummary(await this.readSummary(rel));
+        } catch (err) {
+          if (err instanceof ValidationError) return null;
+          throw err;
+        }
+      }),
+    );
+    return found.filter((n): n is NoteSummary => n !== null);
   }
 
   // ---- writing ------------------------------------------------------------
@@ -384,6 +417,8 @@ export class FileStore implements NoteStore {
         const body = linked ? rewriteLinks(item.body, oldSlug, newSlug) : item.body;
         rewrites.push({ rel: item.path, content: serializeNote(fm, body), slug: item.slug });
       }
+      // A pin moves to the new slug in place. When the new slug was already pinned (a hand edit), the first place wins.
+      const pins = await this.pinsAfter(oldSlug, (list) => [...new Set(list.map((s) => (s === oldSlug ? newSlug : s)))]);
 
       await io(async () => {
         const fm: Frontmatter = { ...moving.frontmatter, updated: today() };
@@ -391,9 +426,11 @@ export class FileStore implements NoteStore {
         await fs.writeFile(this.abs(newRel), serializeNote(fm, body), "utf8");
         await fs.unlink(this.abs(oldRel));
         for (const r of rewrites) await fs.writeFile(this.abs(r.rel), r.content, "utf8");
+        if (pins) await fs.writeFile(this.abs(PINS_FILE), serializePins(pins), "utf8");
       }, `rename ${oldRel} -> ${newRel}`);
 
-      await this.git.commit(`${meta.tool}: rename ${oldSlug} -> ${newSlug}`, [oldRel, newRel, ...rewrites.map((r) => r.rel)]);
+      const paths = [oldRel, newRel, ...rewrites.map((r) => r.rel), ...(pins ? [PINS_FILE] : [])];
+      await this.git.commit(`${meta.tool}: rename ${oldSlug} -> ${newSlug}`, paths);
       return { note: await this.readNote(newRel), rewritten: rewrites.map((r) => r.slug) };
     });
   }
@@ -403,8 +440,12 @@ export class FileStore implements NoteStore {
     await this.git.serialize(async () => {
       const rel = isValidSlug(slug) ? await io(() => this.locate(slug), `locate ${slug}`) : null;
       if (!rel) throw new NotFoundError(`note ${slug}`);
-      await io(() => fs.unlink(this.abs(rel)), `delete ${rel}`);
-      await this.git.commit(`${meta.tool}: delete ${slug}`, [rel]);
+      const pins = await this.pinsAfter(slug, (list) => list.filter((s) => s !== slug));
+      await io(async () => {
+        await fs.unlink(this.abs(rel));
+        if (pins) await fs.writeFile(this.abs(PINS_FILE), serializePins(pins), "utf8");
+      }, `delete ${rel}`);
+      await this.git.commit(`${meta.tool}: delete ${slug}`, pins ? [rel, PINS_FILE] : [rel]);
     });
   }
 
@@ -455,6 +496,105 @@ export class FileStore implements NoteStore {
       );
       await this.git.commit(`${meta.tool}: create tag ${name}`, [TAGS_FILE]);
       return created;
+    });
+  }
+
+  // ---- pins ---------------------------------------------------------------
+
+  async pins(): Promise<PinLists> {
+    return (await this.readPins()).lists;
+  }
+
+  /** pins.yml read loosely, with the reason it reads as no pins when it is malformed. */
+  private async readPins(): Promise<{ lists: PinLists; problem: string | null }> {
+    const raw = await io(async () => {
+      try {
+        return await fs.readFile(this.abs(PINS_FILE), "utf8");
+      } catch (err) {
+        if (isNodeError(err) && err.code === "ENOENT") return "";
+        throw err;
+      }
+    }, `read ${PINS_FILE}`);
+    const none = (problem: string | null) => ({ lists: { home: [], sidebar: [] }, problem });
+    let data: unknown;
+    try {
+      data = parseYaml(raw);
+    } catch (err) {
+      return none(`not valid YAML: ${(err instanceof Error ? err.message : String(err)).split("\n")[0]}`);
+    }
+    if (data === null || data === undefined) return none(null);
+    if (typeof data !== "object" || Array.isArray(data)) return none("must be a mapping with home and sidebar lists");
+    const lists: PinLists = { home: [], sidebar: [] };
+    for (const target of PIN_TARGETS) {
+      const value = (data as Record<string, unknown>)[target];
+      if (value === undefined || value === null) continue;
+      if (!Array.isArray(value)) return none(`${target} must be a list of slugs`);
+      const bad = value.filter((s) => !isValidSlug(s));
+      if (bad.length) return none(`${target} holds entries that are not slugs: ${bad.map((s) => JSON.stringify(s)).join(", ")}`);
+      lists[target] = [...new Set(value as string[])];
+    }
+    return { lists, problem: null };
+  }
+
+  /**
+   * The pin lists with `change` applied to both, or null when neither holds `slug`, so there is nothing to write. A
+   * malformed pins.yml holds nothing and is left as it is. Call from a serialized section.
+   */
+  private async pinsAfter(slug: string, change: (list: string[]) => string[]): Promise<PinLists | null> {
+    const { lists } = await this.readPins();
+    if (!PIN_TARGETS.some((t) => lists[t].includes(slug))) return null;
+    return { home: change(lists.home), sidebar: change(lists.sidebar) };
+  }
+
+  async setPin(slug: string, target: PinTarget, pinned: boolean, meta: WriteMeta): Promise<PinLists> {
+    const problems: string[] = [];
+    if (!PIN_TARGETS.includes(target)) problems.push(targetProblem());
+    if (!isValidSlug(slug)) problems.push(slugProblem("slug", slug));
+    if (typeof pinned !== "boolean") problems.push("pinned must be true or false");
+    if (problems.length) throw new ValidationError(problems.join("; "));
+
+    return this.git.serialize(async () => {
+      const { lists } = await this.readPins();
+      const list = lists[target];
+      if (list.includes(slug) === pinned) return lists;
+      if (pinned) {
+        if (!(await io(() => this.locate(slug), `locate ${slug}`))) throw new NotFoundError(`note ${slug}`);
+        if (list.length >= PINS_MAX) throw new ValidationError(pinLimitProblem(target));
+      }
+      const next: PinLists = { ...lists, [target]: pinned ? [...list, slug] : list.filter((s) => s !== slug) };
+      await io(() => fs.writeFile(this.abs(PINS_FILE), serializePins(next), "utf8"), `write ${PINS_FILE}`);
+      const action = pinned ? `pin ${slug} to ${target}` : `unpin ${slug} from ${target}`;
+      await this.git.commit(`${meta.tool}: ${action}`, [PINS_FILE]);
+      return next;
+    });
+  }
+
+  async reorderPins(target: PinTarget, slugs: string[], meta: WriteMeta): Promise<PinLists> {
+    if (!PIN_TARGETS.includes(target)) throw new ValidationError(targetProblem());
+    if (!Array.isArray(slugs) || !slugs.every((s) => typeof s === "string")) throw new ValidationError("slugs must be a list of slugs");
+
+    return this.git.serialize(async () => {
+      const { lists } = await this.readPins();
+      const current = lists[target];
+      const repeated = [...new Set(slugs.filter((s, i) => slugs.indexOf(s) !== i))];
+      const unpinned = [...new Set(slugs.filter((s) => !current.includes(s)))];
+      const left = current.filter((s) => !slugs.includes(s));
+      // GET /api/pins never shows a slug with no valid note, so a caller may leave one out. The others may not be.
+      const leftWithNotes = (await this.summaries(left)).map((n) => n.slug);
+      if (repeated.length || unpinned.length || leftWithNotes.length) {
+        const details = [
+          leftWithNotes.length ? `missing: ${leftWithNotes.join(", ")}` : "",
+          unpinned.length ? `not pinned to ${target}: ${unpinned.join(", ")}` : "",
+          repeated.length ? `repeated: ${repeated.join(", ")}` : "",
+        ];
+        throw new ValidationError(`slugs must hold every slug pinned to ${target}, each once (${details.filter(Boolean).join("; ")})`);
+      }
+      const order = [...slugs, ...left];
+      if (order.every((s, i) => s === current[i])) return lists;
+      const next: PinLists = { ...lists, [target]: order };
+      await io(() => fs.writeFile(this.abs(PINS_FILE), serializePins(next), "utf8"), `write ${PINS_FILE}`);
+      await this.git.commit(`${meta.tool}: reorder ${target} pins`, [PINS_FILE]);
+      return next;
     });
   }
 
@@ -598,12 +738,15 @@ export class FileStore implements NoteStore {
 
   async checkLinks(): Promise<StoreLinkReport> {
     const notes: Note[] = [];
-    const report: StoreLinkReport = { brokenLinks: [], missingFiles: [], missingSources: [], invalidNotes: [] };
+    const report: StoreLinkReport = { brokenLinks: [], missingFiles: [], missingSources: [], invalidNotes: [], missingPins: [] };
     for await (const item of this.readAll()) {
       if ("error" in item) report.invalidNotes.push(item);
       else notes.push(item);
     }
     const slugs = new Set(notes.map((n) => n.slug));
+    const pins = await this.readPins();
+    if (pins.problem) report.invalidNotes.push({ path: PINS_FILE, error: `${pins.problem}; pins read as none until it is fixed` });
+    report.missingPins = [...new Set([...pins.lists.home, ...pins.lists.sidebar])].filter((s) => !slugs.has(s)).sort();
     for (const n of notes) {
       for (const to of n.links) if (!slugs.has(to)) report.brokenLinks.push({ from: n.slug, to });
       for (const source of n.frontmatter.sources ?? []) {

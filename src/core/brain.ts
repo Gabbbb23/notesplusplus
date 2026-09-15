@@ -12,6 +12,9 @@ import type {
   NoteStore,
   NoteSummary,
   NoteTrail,
+  PinLists,
+  PinnedNotes,
+  PinTarget,
   RenameResult,
   SearchIndex,
   SearchOptions,
@@ -114,6 +117,25 @@ export class BrainImpl implements Brain {
 
   createTag(tag: Tag, meta: WriteMeta): Promise<Tag> {
     return this.store.createTag(tag, meta);
+  }
+
+  async pins(): Promise<PinnedNotes> {
+    return this.pinnedNotes(await this.store.pins());
+  }
+
+  async setPin(slug: string, target: PinTarget, pinned: boolean, meta: WriteMeta): Promise<PinnedNotes> {
+    return this.pinnedNotes(await this.store.setPin(slug, target, pinned, meta));
+  }
+
+  async reorderPins(target: PinTarget, slugs: string[], meta: WriteMeta): Promise<PinnedNotes> {
+    return this.pinnedNotes(await this.store.reorderPins(target, slugs, meta));
+  }
+
+  /** Pinned slugs as notes, in pin order. Pins never reach the index, so a hand-deleted note drops out at once. */
+  private async pinnedNotes(lists: PinLists): Promise<PinnedNotes> {
+    const bySlug = new Map((await this.store.summaries([...lists.home, ...lists.sidebar])).map((n) => [n.slug, n]));
+    const notes = (slugs: string[]) => slugs.flatMap((slug) => bySlug.get(slug) ?? []);
+    return { home: notes(lists.home), sidebar: notes(lists.sidebar) };
   }
 
   inboxList(): Promise<InboxItem[]> {

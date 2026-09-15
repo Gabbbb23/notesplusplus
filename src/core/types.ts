@@ -11,6 +11,7 @@
  *   files/**             attachments (pdf, docx, pptx, xlsx, images, anything)
  *   inbox/**             raw material dropped by the owner, waiting for the agent
  *   tags.yml             tag registry: list of { name, description }
+ *   pins.yml             the owner's pins: `home` and `sidebar`, each an ordered list of slugs
  *   .git                 auto-committed on every write
  *
  * A slug is unique across notes/ and sources/. Links are [[slug]] or [[slug|label]]; src/core/graph/note-body.ts
@@ -21,6 +22,7 @@ import type * as contract from "./contract/index.ts";
 
 export type NoteType = z.infer<typeof contract.noteTypeSchema>;
 export type SearchMode = z.infer<typeof contract.searchModeSchema>;
+export type PinTarget = z.infer<typeof contract.pinTargetSchema>;
 
 /** ISO date, YYYY-MM-DD. */
 export type IsoDate = string;
@@ -33,6 +35,8 @@ export type Note = z.infer<typeof contract.noteSchema>;
 export type InvalidNote = z.infer<typeof contract.invalidNoteSchema>;
 export type Tag = z.infer<typeof contract.tagSchema>;
 export type TagWithCount = z.infer<typeof contract.tagWithCountSchema>;
+export type PinLists = z.infer<typeof contract.pinListsSchema>;
+export type PinnedNotes = z.infer<typeof contract.pinnedNotesSchema>;
 export type InboxItem = z.infer<typeof contract.inboxItemSchema>;
 export type FileEntry = z.infer<typeof contract.fileEntrySchema>;
 export type StoreLinkReport = z.infer<typeof contract.storeLinkReportSchema>;
@@ -76,17 +80,39 @@ export interface NoteStore {
   /** Every valid note matching the filter, sorted by title, then by slug when titles are equal (`compareSummaries`). */
   list(filter?: ListFilter): Promise<NoteSummary[]>;
   get(slug: string): Promise<Note | null>;
+  /**
+   * The summaries of the valid notes with these slugs, in the order given, each once, without parsing bodies. A slug
+   * with no note file, or whose file does not parse, is left out.
+   */
+  summaries(slugs: string[]): Promise<NoteSummary[]>;
   /** Yield every parseable note and every invalid file. Used by the indexer. */
   readAll(): AsyncIterable<Note | InvalidNote>;
 
   /** Create or replace. Validates frontmatter, tags, and slug. Sets updated (and created on first write). Commits. */
   write(input: WriteNoteInput, meta: WriteMeta): Promise<Note>;
-  /** Move the file and rewrite [[oldSlug]] and sources entries across the store. Commits once. */
+  /** Move the file and rewrite [[oldSlug]] and sources entries across the store, and the slug in pins.yml. Commits once. */
   rename(oldSlug: string, newSlug: string, meta: WriteMeta): Promise<RenameResult>;
+  /** Remove the file and its pins. Commits once. */
   delete(slug: string, meta: WriteMeta): Promise<void>;
 
   tags(): Promise<Tag[]>;
   createTag(tag: Tag, meta: WriteMeta): Promise<Tag>;
+
+  /**
+   * The slugs pins.yml lists, read loosely: a missing file is no pins, unknown keys are ignored, a repeated slug keeps
+   * its first place, and a malformed file reads as no pins (checkLinks reports it).
+   */
+  pins(): Promise<PinLists>;
+  /**
+   * Pin a slug to the end of a target's list, or unpin it. Pinning refuses a slug with no note file (NotFoundError)
+   * and a pin past PINS_MAX (ValidationError). One commit, or none when the lists do not change. Returns the lists after.
+   */
+  setPin(slug: string, target: PinTarget, pinned: boolean, meta: WriteMeta): Promise<PinLists>;
+  /**
+   * Replace a target's order. `slugs` must hold every slug pinned there, each once; slugs with no valid note may be left
+   * out and move to the end. ValidationError otherwise. One commit, or none when the order does not change.
+   */
+  reorderPins(target: PinTarget, slugs: string[], meta: WriteMeta): Promise<PinLists>;
 
   inboxList(): Promise<InboxItem[]>;
   /**
@@ -185,12 +211,25 @@ export interface Brain {
   tags(): Promise<Tag[]>;
   createTag(tag: Tag, meta: WriteMeta): Promise<Tag>;
 
+  /**
+   * The notes pinned to Home and to the sidebar, in pin order, read from pins.yml and the note files (not the index).
+   * A pinned slug with no valid note is left out, not unpinned; checkLinks lists it.
+   */
+  pins(): Promise<PinnedNotes>;
+  /** See `NoteStore.setPin`. Returns every pinned note after the change. */
+  setPin(slug: string, target: PinTarget, pinned: boolean, meta: WriteMeta): Promise<PinnedNotes>;
+  /** See `NoteStore.reorderPins`. Returns every pinned note after the change. */
+  reorderPins(target: PinTarget, slugs: string[], meta: WriteMeta): Promise<PinnedNotes>;
+
   inboxList(): Promise<InboxItem[]>;
   inboxTake(name: string, opts: InboxTakeOptions, meta: WriteMeta): Promise<InboxTakeResult>;
   inboxAdd(name: string, content: string): Promise<InboxItem>;
 
   files(): Promise<FileEntry[]>;
-  /** Broken links, missing files and sources, and invalid notes from the files on disk; hub membership from the index. */
+  /**
+   * Broken links, missing files and sources, invalid notes, and pins with no note from the files on disk; hub
+   * membership from the index.
+   */
   checkLinks(): Promise<LinkReport>;
   stats(): Promise<BrainStats>;
 }

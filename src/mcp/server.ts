@@ -9,6 +9,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import {
   NOTE_LIST_LIMIT,
+  PINS_MAX,
   SEARCH_LIMIT,
   SUMMARY_MAX_CHARS,
   createTagInputSchema,
@@ -16,14 +17,16 @@ import {
   inboxTakeInputSchema,
   noteListLimitSchema,
   noteListOptionsSchema,
+  pinnedNotesSchema,
   renameInputSchema,
   requiredText,
   searchLimitSchema,
   searchOptionsSchema,
   searchPageSchema,
+  setPinInputSchema,
   writeNoteInputSchema,
 } from "../core/contract/index.ts";
-import type { LinkReport, NotePage, NoteSummary, SearchResult } from "../core/types.ts";
+import type { LinkReport, NotePage, NoteSummary, PinnedNotes, SearchResult } from "../core/types.ts";
 import type { BrainClient } from "./client.ts";
 
 export interface McpServerOptions {
@@ -45,6 +48,7 @@ const listNotesInput = noteListOptionsSchema.shape;
 const writeInput = writeNoteInputSchema.shape;
 const frontmatterInput = frontmatterInputSchema.shape;
 const inboxTakeInput = inboxTakeInputSchema.shape;
+const setPinInput = setPinInputSchema.shape;
 
 export function createMcpServer(client: BrainClient, opts: McpServerOptions): McpServer {
   const server = new McpServer({ name: "brain", version: "0.1.0" });
@@ -220,6 +224,38 @@ export function createMcpServer(client: BrainClient, opts: McpServerOptions): Mc
   );
 
   server.registerTool(
+    "list_pins",
+    {
+      title: "List pins",
+      description:
+        "The owner's pins: the notes, hubs, and sources pinned to Home and to the sidebar, in the owner's order, one line each with slug, type, and title. Pins are shortcuts to what the owner opens often, not a map of the brain. A pinned slug whose note is gone is left out; check_links lists it.",
+      outputSchema: pinnedNotesSchema.shape,
+      annotations: { readOnlyHint: true },
+    },
+    guard(async () => {
+      const pins = await client.pins();
+      return { content: [{ type: "text", text: formatPins(pins) }], structuredContent: pins };
+    }),
+  );
+
+  server.registerTool(
+    "set_pin",
+    {
+      title: "Pin or unpin a note",
+      description: `Pin a note, hub, or source to Home or to the sidebar, or unpin it. Use it only when the owner asks to pin or unpin something; pins are the owner's shortcuts, so never set them on your own while filing or gardening. A new pin goes to the end of its list, and pinning something already pinned changes nothing. Each target holds at most ${PINS_MAX} pins. Every change is a git commit. Returns every pin after the change.`,
+      inputSchema: {
+        slug: setPinInput.slug.describe("The note, hub, or source slug."),
+        target: setPinInput.target.describe("home (the Home page) or sidebar."),
+        pinned: setPinInput.pinned.describe("true to pin, false to unpin."),
+      },
+    },
+    guard(async ({ slug, target, pinned }) => {
+      const pins = await client.setPin(slug, target, pinned);
+      return text(`${slug} is ${pinned ? "" : "not "}pinned to ${target}.\n${formatPins(pins)}`);
+    }),
+  );
+
+  server.registerTool(
     "inbox_list",
     {
       title: "List the inbox",
@@ -265,7 +301,7 @@ export function createMcpServer(client: BrainClient, opts: McpServerOptions): Mc
     {
       title: "Check links and files",
       description:
-        "Report broken wikilinks, missing attachments, missing sources, files that fail to parse, notes of type note that no hub lists, and notes listed by more than one hub. Run it after filing or gardening and fix everything it lists.",
+        "Report broken wikilinks, missing attachments, missing sources, files that fail to parse, pins whose note is gone, notes of type note that no hub lists, and notes listed by more than one hub. Run it after filing or gardening and fix everything it lists.",
       annotations: { readOnlyHint: true },
     },
     guard(async () => text(formatLinkReport(await client.checkLinks()))),
@@ -357,6 +393,17 @@ function formatSummary(n: NoteSummary): string {
   return `${n.slug} — ${n.title} — ${n.summary}`;
 }
 
+/** Home pins, then sidebar pins, one line each: slug, type, title. */
+function formatPins(pins: PinnedNotes): string {
+  if (pins.home.length === 0 && pins.sidebar.length === 0) return "No pins.";
+  const lines: string[] = [];
+  for (const [label, notes] of [["Home", pins.home], ["Sidebar", pins.sidebar]] as const) {
+    lines.push(notes.length === 0 ? `${label}: none` : `${label}:`);
+    for (const n of notes) lines.push(`  ${n.slug} — ${n.type} — ${n.title}`);
+  }
+  return lines.join("\n");
+}
+
 /** One line per note, then a line pointing at the next page when more remain. */
 function formatNotePage(page: NotePage): string {
   if (page.items.length === 0) {
@@ -389,6 +436,10 @@ export function formatLinkReport(report: LinkReport): string {
   if (report.invalidNotes.length > 0) {
     lines.push("Invalid notes:");
     for (const i of report.invalidNotes) lines.push(`  ${i.path}: ${i.error}`);
+  }
+  if (report.missingPins.length > 0) {
+    lines.push("Pins with no note:");
+    for (const slug of report.missingPins) lines.push(`  ${slug}`);
   }
   if (report.notesWithoutHub.length > 0) {
     lines.push("Notes no hub lists:");

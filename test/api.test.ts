@@ -7,6 +7,7 @@ import { z } from "zod";
 import { contentTypeFor } from "../src/api/file-response.ts";
 import { createApi } from "../src/api/index.ts";
 import type { Launcher } from "../src/api/launcher.ts";
+import { EXPORT_TIMEOUT_MS, type PdfOptions, type PrintBrowser } from "../src/api/pdf-export.ts";
 import {
   brainStatsSchema,
   errorEnvelopeSchema,
@@ -21,13 +22,14 @@ import {
   notePageSchema,
   noteTrailSchema,
   openResultSchema,
+  pinnedNotesSchema,
   renameResultSchema,
   revealResultSchema,
   searchPageSchema,
   tagSchema,
   tagWithCountSchema,
 } from "../src/core/contract/index.ts";
-import type { Brain, NotePage, SearchPage } from "../src/core/types.ts";
+import type { Brain, NotePage, PinnedNotes, SearchPage } from "../src/core/types.ts";
 import { TempBrain, type NoteFixture } from "./helpers/temp-brain.ts";
 
 // The REST app runs on a real brain: file store, git repo, and SQLite index (embeddings off) in temp folders.
@@ -57,6 +59,61 @@ const launcher: Launcher = {
   open: async (p) => void launched.push({ action: "open", path: p }),
   reveal: async (p, isDirectory) => void launched.push({ action: "reveal", path: p, isDirectory }),
 };
+
+type PrintReady = { ready: "true" | "error"; error: string | null };
+
+/** The port the REST app believes it listens on, for the print page URL. */
+const PRINT_PORT = 4321;
+
+/**
+ * The PrintBrowser every app in this file gets, so no test starts Edge. It records each call in `log`. Tests set
+ * `launchError` to make launch throw, and `ready` to decide when and how the print page becomes ready. Closing the
+ * browser rejects a wait still pending, as Playwright does.
+ */
+const printer = {
+  log: [] as string[],
+  pdfOptions: [] as PdfOptions[],
+  launchError: null as Error | null,
+  ready: async (): Promise<PrintReady> => ({ ready: "true", error: null }),
+  reset() {
+    this.log = [];
+    this.pdfOptions = [];
+    this.launchError = null;
+    this.ready = async () => ({ ready: "true", error: null });
+  },
+};
+
+const printBrowser: PrintBrowser = {
+  async launch(width) {
+    printer.log.push(`launch ${width}`);
+    if (printer.launchError) throw printer.launchError;
+    let onClose = () => {};
+    const closed = new Promise<never>((_, reject) => (onClose = () => reject(new Error("Target page, context or browser has been closed"))));
+    closed.catch(() => undefined);
+    return {
+      goto: async (url) => void printer.log.push(`goto ${url}`),
+      waitForPrintReady: () => {
+        printer.log.push("wait");
+        return Promise.race([printer.ready(), closed]);
+      },
+      pdf: async (options) => {
+        printer.log.push("pdf");
+        printer.pdfOptions.push(options);
+        return new Uint8Array(Buffer.from("%PDF-1.7 fake"));
+      },
+      close: async () => {
+        printer.log.push("close");
+        onClose();
+      },
+    };
+  },
+};
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => (resolve = r));
+  return { promise, resolve };
+}
 
 const json = (body: unknown, headers: Record<string, string> = {}) => ({
   method: "POST",
@@ -147,6 +204,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   launched = [];
+  printer.reset();
 });
 
 afterEach(() => {
@@ -157,7 +215,7 @@ function use(t: TempBrain): void {
   tb = t;
   brain = t.brain;
   root = t.root;
-  app = createApi(brain, { conventionsDir, launcher });
+  app = createApi(brain, { conventionsDir, launcher, printBrowser, listenPort: () => PRINT_PORT });
 }
 
 /** Every test in the enclosing describe gets its own copy of the seeded brain. For groups whose tests change it. */
@@ -545,6 +603,300 @@ describe("tags", () => {
   });
 });
 
+describe("pins", () => {
+  freshBrainPerTest();
+
+  const put = (url: string, body: unknown, headers: Record<string, string> = {}) => app.request(url, { ...json(body, headers), method: "PUT" });
+  const web = { "X-Brain-Tool": "web" };
+  /** A pins response as slugs, with its status. */
+  const pinned = async (res: Response) => {
+    const body = (await res.json()) as PinnedNotes;
+    return { status: res.status, home: body.home.map((n) => n.slug), sidebar: body.sidebar.map((n) => n.slug) };
+  };
+  const failure = async (res: Response) => ({ status: res.status, body: await res.json() });
+
+  it("GET /api/pins starts empty; PUT /api/pins/:target pins to the end, keeps a pinned note's place, and unpins", async () => {
+    expect(await failure(await app.request("/api/pins"))).toEqual({ status: 200, body: { home: [], sidebar: [] } });
+    const before = (await tb.commits()).length;
+
+    const first = await put("/api/pins/home", { slug: "ryzen-laptop-specs", pinned: true }, web);
+    expect(first.status).toBe(200);
+    const specs = (await brain.get("ryzen-laptop-specs"))!;
+    expect(await first.json()).toEqual({
+      home: [{ slug: specs.slug, path: specs.path, title: specs.title, type: specs.type, summary: specs.summary, tags: specs.tags, created: specs.created, updated: specs.updated }],
+      sidebar: [],
+    });
+
+    expect(await pinned(await put("/api/pins/home", { slug: "laptop-transcript", pinned: true }, web))).toEqual({
+      status: 200,
+      home: ["ryzen-laptop-specs", "laptop-transcript"],
+      sidebar: [],
+    });
+    expect(await pinned(await put("/api/pins/sidebar", { slug: "index", pinned: true }, web))).toMatchObject({ sidebar: ["index"] });
+    // Pinning again keeps the place; unpinning what is not pinned is a no-op. Neither commits.
+    expect(await pinned(await put("/api/pins/home", { slug: "ryzen-laptop-specs", pinned: true }, web))).toEqual({
+      status: 200,
+      home: ["ryzen-laptop-specs", "laptop-transcript"],
+      sidebar: ["index"],
+    });
+    expect(await pinned(await put("/api/pins/sidebar", { slug: "laptop-transcript", pinned: false }, web))).toMatchObject({ status: 200 });
+    // A body's target never overrides the path.
+    const unpinned = await put("/api/pins/home", { slug: "ryzen-laptop-specs", pinned: false, target: "sidebar" }, web);
+    expect(await pinned(unpinned)).toEqual({ status: 200, home: ["laptop-transcript"], sidebar: ["index"] });
+    expect(await pinned(await app.request("/api/pins"))).toEqual({ status: 200, home: ["laptop-transcript"], sidebar: ["index"] });
+
+    expect((await tb.commits()).slice(0, 4)).toEqual([
+      "web: unpin ryzen-laptop-specs from home",
+      "web: pin index to sidebar",
+      "web: pin laptop-transcript to home",
+      "web: pin ryzen-laptop-specs to home",
+    ]);
+    expect(await tb.commits()).toHaveLength(before + 4);
+  });
+
+  it("GET /api/pins skips a pinned slug whose note is gone and keeps it in pins.yml", async () => {
+    await tb.addFile("pins.yml", "home: [gone, ryzen-laptop-specs]\nsidebar: [gone]\n");
+    expect(await pinned(await app.request("/api/pins"))).toEqual({ status: 200, home: ["ryzen-laptop-specs"], sidebar: [] });
+    expect(fs.readFileSync(path.join(root, "pins.yml"), "utf8")).toContain("gone");
+    expect(((await (await app.request("/api/check-links")).json()) as { missingPins: string[] }).missingPins).toEqual(["gone"]);
+  });
+
+  it("PUT /api/pins/:target refuses an unknown target, a body that does not fit, and an unknown slug", async () => {
+    const before = (await tb.commits()).length;
+    const slugRule = 'slug "Index" must match /^[a-z0-9]+(-[a-z0-9]+)*$/';
+    expect(await failure(await put("/api/pins/top", { slug: "index", pinned: true }))).toEqual({
+      status: 400,
+      body: { error: { code: "validation", message: "target must be one of home, sidebar" } },
+    });
+    expect(await failure(await put("/api/pins/home", { slug: "Index", pinned: true }))).toEqual({
+      status: 400,
+      body: { error: { code: "validation", message: slugRule } },
+    });
+    const everything = (await failure(await put("/api/pins/Home", { slug: "Index", pinned: "yes" }))) as { status: number; body: { error: { message: string } } };
+    expect(everything.status).toBe(400);
+    expect(everything.body.error.message.split("; ")).toEqual(["target must be one of home, sidebar", slugRule, expect.stringMatching(/^pinned: /)]);
+    for (const body of [{ slug: "index" }, { pinned: true }, [], null]) {
+      expect((await put("/api/pins/home", body)).status, JSON.stringify(body)).toBe(400);
+    }
+    const badJson = await app.request("/api/pins/home", { method: "PUT", headers: { "content-type": "application/json" }, body: "{nope" });
+    expect(await failure(badJson)).toEqual({ status: 400, body: { error: { code: "validation", message: "invalid JSON body" } } });
+
+    expect(await failure(await put("/api/pins/home", { slug: "nope", pinned: true }))).toEqual({
+      status: 404,
+      body: { error: { code: "not_found", message: "note nope not found" } },
+    });
+    expect(await tb.commits()).toHaveLength(before);
+  });
+
+  it("PUT /api/pins/:target refuses a 51st pin with a message naming the limit", async () => {
+    const fifty = Array.from({ length: 50 }, (_, i): NoteFixture => ({
+      slug: `pin-${i + 1}`,
+      frontmatter: { title: `Pin ${i + 1}`, type: "note", summary: "s", tags: [] },
+      body: "",
+    }));
+    await tb.writeNotes(fifty);
+    await tb.addFile("pins.yml", `home:\n${fifty.map((n) => `  - ${n.slug}\n`).join("")}`);
+
+    expect(await failure(await put("/api/pins/home", { slug: "index", pinned: true }))).toEqual({
+      status: 400,
+      body: { error: { code: "validation", message: "home already holds 50 pins, the most it can hold. Unpin one first." } },
+    });
+    expect((await put("/api/pins/sidebar", { slug: "index", pinned: true })).status).toBe(200);
+  });
+
+  it("PUT /api/pins/:target/order sets a new order and refuses any list that is not the pinned slugs", async () => {
+    await tb.addFile("pins.yml", "home: [index, ryzen-laptop-specs, laptop-transcript]\nsidebar: [index]\n");
+
+    const reordered = await put("/api/pins/home/order", { slugs: ["laptop-transcript", "index", "ryzen-laptop-specs"] }, web);
+    expect(await pinned(reordered)).toEqual({ status: 200, home: ["laptop-transcript", "index", "ryzen-laptop-specs"], sidebar: ["index"] });
+    expect((await tb.commits())[0]).toBe("web: reorder home pins");
+
+    const refusals: Array<[string, unknown, string]> = [
+      ["/api/pins/home/order", { slugs: ["index", "laptop-transcript"] }, "slugs must hold every slug pinned to home, each once (missing: ryzen-laptop-specs)"],
+      ["/api/pins/sidebar/order", { slugs: ["index", "laptop-transcript"] }, "slugs must hold every slug pinned to sidebar, each once (not pinned to sidebar: laptop-transcript)"],
+      ["/api/pins/sidebar/order", { slugs: ["index", "index"] }, "slugs must hold every slug pinned to sidebar, each once (repeated: index)"],
+      ["/api/pins/top/order", { slugs: ["index"] }, "target must be one of home, sidebar"],
+    ];
+    for (const [url, body, message] of refusals) {
+      expect(await failure(await put(url, body)), `${url} ${JSON.stringify(body)}`).toEqual({ status: 400, body: { error: { code: "validation", message } } });
+    }
+    for (const body of [{}, { slugs: "index" }, { slugs: ["Index"] }]) {
+      expect((await put("/api/pins/home/order", body)).status, JSON.stringify(body)).toBe(400);
+    }
+    expect(await pinned(await app.request("/api/pins"))).toEqual({ status: 200, home: ["laptop-transcript", "index", "ryzen-laptop-specs"], sidebar: ["index"] });
+  });
+
+  it("PUT pin routes answer 415 without a JSON content type, and pass the request guard like every route", async () => {
+    const before = (await tb.commits()).length;
+    const routes: Array<[string, unknown]> = [
+      ["/api/pins/home", { slug: "index", pinned: true }],
+      ["/api/pins/home/order", { slugs: [] }],
+    ];
+    for (const [url, body] of routes) {
+      for (const headers of [{ "content-type": "text/plain" }, { "content-type": "application/x-www-form-urlencoded" }, {}] as Array<Record<string, string>>) {
+        const res = await app.request(url, { method: "PUT", headers, body: JSON.stringify(body) });
+        expect(res.status, `${url} ${JSON.stringify(headers)}`).toBe(415);
+        expect(await errorCode(res)).toBe("unsupported_media_type");
+      }
+      for (const headers of [{ origin: "http://evil.com" }, { "sec-fetch-site": "cross-site" }, { host: "evil.com" }] as Array<Record<string, string>>) {
+        const res = await put(url, body, headers);
+        expect(res.status, `${url} ${JSON.stringify(headers)}`).toBe(403);
+        expect(await errorCode(res)).toBe("forbidden");
+      }
+    }
+    expect((await app.request("/api/pins", { headers: { origin: "http://evil.com" } })).status).toBe(403);
+    expect(await tb.commits()).toHaveLength(before);
+
+    // The built web UI, with a charset on its content type.
+    const fromUi = await put("/api/pins/home", { slug: "index", pinned: true }, {
+      "content-type": "application/json; charset=utf-8",
+      host: "localhost:3777",
+      origin: "http://localhost:3777",
+      "sec-fetch-site": "same-origin",
+    });
+    expect(await pinned(fromUi)).toEqual({ status: 200, home: ["index"], sidebar: [] });
+  });
+});
+
+describe("note exports", () => {
+  const TITLE = "Prelims: when? <Week 7> & finals";
+  const exportPdf = (slug: string) => app.request(`/api/notes/${slug}/export.pdf`);
+  const body = async (res: Response) => ({ status: res.status, body: await res.json() });
+
+  sharedBrain((t) =>
+    t.writeNotes([
+      { slug: "exam-schedule", frontmatter: { title: TITLE, type: "note", summary: "s", tags: [] }, body: "| Exam | Week |\n|---|---|\n| Prelims | 7 |\n" },
+      { slug: "resume", frontmatter: { title: "Résumé (final)", type: "note", summary: "s", tags: [] }, body: "" },
+    ]),
+  );
+
+  it("GET /api/notes/:slug/export.md sends the note file's bytes as an attachment, for notes and sources", async () => {
+    const exports = [
+      ["ryzen-laptop-specs", "notes/ryzen-laptop-specs.md"],
+      ["laptop-transcript", "sources/laptop-transcript.md"],
+      ["exam-schedule", "notes/exam-schedule.md"],
+    ] as const;
+    for (const [slug, rel] of exports) {
+      const res = await app.request(`/api/notes/${slug}/export.md`);
+      expect(res.status, slug).toBe(200);
+      expect(res.headers.get("content-type"), slug).toBe("text/markdown; charset=utf-8");
+      expect(res.headers.get("content-disposition"), slug).toBe(`attachment; filename="${slug}.md"`);
+      const bytes = Buffer.from(await res.arrayBuffer());
+      expect(bytes.equals(fs.readFileSync(path.join(root, ...rel.split("/")))), slug).toBe(true);
+      expect(bytes.toString("utf8"), slug).toMatch(/^---\ntitle: /);
+    }
+    expect(await body(await app.request("/api/notes/nope/export.md"))).toEqual({ status: 404, body: { error: { code: "not_found", message: "note nope not found" } } });
+  });
+
+  it("GET /api/notes/:slug/export.pdf prints this server's print page at its listen port once the page is ready", async () => {
+    const ready = deferred<PrintReady>();
+    printer.ready = () => ready.promise;
+    const pending = exportPdf("exam-schedule");
+    await vi.waitFor(() => expect(printer.log).toContain("wait"), { timeout: 10_000, interval: 20 });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(printer.log).toEqual(["launch 1024", `goto http://127.0.0.1:${PRINT_PORT}/print/notes/exam-schedule`, "wait"]);
+
+    ready.resolve({ ready: "true", error: null });
+    const res = await pending;
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("application/pdf");
+    expect(res.headers.get("content-disposition")).toBe(
+      `attachment; filename="Prelims when Week 7 & finals.pdf"; filename*=UTF-8''Prelims%20when%20Week%207%20%26%20finals.pdf`,
+    );
+    expect(Buffer.from(await res.arrayBuffer()).toString()).toBe("%PDF-1.7 fake");
+    expect(printer.log.slice(3)).toEqual(["pdf", "close"]);
+
+    const [options] = printer.pdfOptions;
+    expect(options).toMatchObject({
+      format: "A4",
+      printBackground: true,
+      margin: { top: "18mm", bottom: "20mm", left: "16mm", right: "16mm" },
+      displayHeaderFooter: true,
+      headerTemplate: "<span></span>",
+    });
+    expect(options!.footerTemplate).toContain("Prelims: when? &#60;Week 7&#62; &#38; finals</span>");
+    expect(options!.footerTemplate).toContain('page <span class="pageNumber"></span> of <span class="totalPages"></span>');
+    expect(options!.footerTemplate).toContain("font-size: 8px");
+
+    const named = await exportPdf("resume");
+    expect(named.headers.get("content-disposition")).toBe(`attachment; filename="R_sum_ (final).pdf"; filename*=UTF-8''R%C3%A9sum%C3%A9%20%28final%29.pdf`);
+  });
+
+  it("GET /api/notes/:slug/export.pdf runs one export at a time, and a second waits for the first to close its browser", async () => {
+    const first = deferred<PrintReady>();
+    let waits = 0;
+    printer.ready = () => (++waits === 1 ? first.promise : Promise.resolve({ ready: "true", error: null }));
+
+    const one = exportPdf("exam-schedule");
+    const two = exportPdf("ryzen-laptop-specs");
+    await vi.waitFor(() => expect(printer.log).toContain("wait"), { timeout: 10_000, interval: 20 });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(printer.log.filter((l) => l.startsWith("launch"))).toHaveLength(1);
+
+    first.resolve({ ready: "true", error: null });
+    expect([(await one).status, (await two).status]).toEqual([200, 200]);
+    expect(printer.log).toEqual([
+      "launch 1024",
+      `goto http://127.0.0.1:${PRINT_PORT}/print/notes/exam-schedule`,
+      "wait",
+      "pdf",
+      "close",
+      "launch 1024",
+      `goto http://127.0.0.1:${PRINT_PORT}/print/notes/ryzen-laptop-specs`,
+      "wait",
+      "pdf",
+      "close",
+    ]);
+  });
+
+  it("GET /api/notes/:slug/export.pdf answers 504 after 30 s, closes the browser, and lets the next export run", async () => {
+    printer.ready = () => new Promise<never>(() => {});
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const pending = exportPdf("exam-schedule");
+      await vi.waitFor(() => expect(printer.log).toContain("wait"), { timeout: 10_000, interval: 20 });
+      await vi.advanceTimersByTimeAsync(EXPORT_TIMEOUT_MS);
+      expect(await body(await pending)).toEqual({
+        status: 504,
+        body: { error: { code: "export_timeout", message: "the PDF export did not finish within 30 s" } },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(printer.log.at(-1)).toBe("close");
+
+    printer.reset();
+    expect((await exportPdf("exam-schedule")).status).toBe(200);
+  });
+
+  it("GET /api/notes/:slug/export.pdf answers 503 when Edge cannot start, 500 when the page fails, and 404 for an unknown slug", async () => {
+    printer.launchError = new Error("Chromium distribution 'msedge' is not found at C:\\Program Files\\Edge\nRun \"npx playwright install msedge\"");
+    expect(await body(await exportPdf("exam-schedule"))).toEqual({
+      status: 503,
+      body: {
+        error: {
+          code: "pdf_unavailable",
+          message:
+            "Microsoft Edge could not be started to make the PDF (Chromium distribution 'msedge' is not found at C:\\Program Files\\Edge). Use the browser's print dialog instead.",
+        },
+      },
+    });
+    expect(printer.log).toEqual(["launch 1024"]);
+
+    printer.reset();
+    printer.ready = async () => ({ ready: "error", error: "mermaid: Parse error on line 3" });
+    expect(await body(await exportPdf("exam-schedule"))).toEqual({
+      status: 500,
+      body: { error: { code: "export_failed", message: "the print page could not render the note: mermaid: Parse error on line 3" } },
+    });
+    expect(printer.log.slice(-2)).toEqual(["wait", "close"]);
+
+    printer.reset();
+    expect(await body(await exportPdf("nope"))).toEqual({ status: 404, body: { error: { code: "not_found", message: "note nope not found" } } });
+    expect(printer.log).toEqual([]);
+  });
+});
+
 describe("inbox", () => {
   freshBrainPerTest();
 
@@ -781,6 +1133,20 @@ describe("request guard", () => {
     );
     expect(viaVite.status).toBe(200);
   });
+
+  it("lets headless Edge's own API calls from the print page on 127.0.0.1 through", async () => {
+    // A PDF export opens http://127.0.0.1:<port>/print/notes/<slug>, and that page fetches the API from the same origin.
+    const page = `http://127.0.0.1:${PRINT_PORT}`;
+    const fromPrintPage: Array<Record<string, string>> = [
+      { host: `127.0.0.1:${PRINT_PORT}`, "sec-fetch-site": "same-origin", "sec-fetch-mode": "cors", referer: `${page}/print/notes/ryzen-laptop-specs` },
+      { host: `127.0.0.1:${PRINT_PORT}`, origin: page, "sec-fetch-site": "same-origin", "sec-fetch-mode": "cors" },
+    ];
+    for (const headers of fromPrintPage) {
+      for (const url of ["/api/notes/ryzen-laptop-specs", "/api/notes/ryzen-laptop-specs/trail", "/api/notes/laptop-transcript/backlinks"]) {
+        expect(await status(url, { headers }), `${url} ${JSON.stringify(headers)}`).toBe(200);
+      }
+    }
+  });
 });
 
 describe("open and reveal (brain files)", () => {
@@ -883,53 +1249,52 @@ describe.runIf(process.platform === "win32")("files outside the brain", () => {
     fs.rmSync(outside, { recursive: true, force: true });
   });
 
-  const localFile = (p: string, headers: Record<string, string> = {}) =>
-    app.request(`/api/local-file?path=${encodeURIComponent(p)}`, { headers });
+  /** Status and error code (null on success) of a request to open or reveal `p`. */
+  const ask = async (route: "open" | "reveal", p: string) => {
+    const res = await app.request(`/api/${route}`, json({ path: p }));
+    return { status: res.status, code: res.ok ? null : await errorCode(res) };
+  };
 
   it("GET /api/notes/:slug lists the note's mentions as written, deduplicated, in body order", async () => {
     const note = (await (await app.request("/api/notes/ethics")).json()) as { mentions: string[] };
     expect(note.mentions).toEqual([pdf, outside, at("setup.exe"), at("Desktop.lnk"), at("Missing.pdf"), at("Double.pdf")]);
   });
 
-  it("GET /api/local-file serves a mentioned path given in another case and slash style", async () => {
-    const res = await localFile(pdf.toUpperCase().replace(/\\/g, "/"));
-    expect(res.status).toBe(200);
-    expect(res.headers.get("content-type")).toBe("application/pdf");
-    expect(res.headers.get("content-disposition")).toContain(`filename*=UTF-8''MODULE%201.PDF`);
-    expect(await res.text()).toBe("%PDF module one");
-
-    const ranged = await localFile(pdf, { range: "bytes=0-3" });
-    expect(ranged.status).toBe(206);
-    expect(await ranged.text()).toBe("%PDF");
-  });
-
-  it("GET /api/local-file serves a path mentioned in double backticks", async () => {
-    const res = await localFile(at("Double.pdf"));
-    expect(res.status).toBe(200);
-    expect(await res.text()).toBe("%PDF Double.pdf");
-  });
-
-  it("GET /api/local-file refuses unmentioned paths and paths written only in code blocks or inside a link", async () => {
-    for (const name of ["Unmentioned.pdf", "Fenced.pdf", "Tilde.pdf", "Indented.pdf", "Linked.pdf"]) {
-      const res = await localFile(at(name));
-      expect(res.status, name).toBe(403);
-      expect(await errorCode(res)).toBe("forbidden");
+  it("open and reveal allow a mentioned path given in another case and slash style, and one in double backticks", async () => {
+    for (const route of ["open", "reveal"] as const) {
+      for (const p of [pdf.toUpperCase().replace(/\\/g, "/"), at("Double.pdf")]) {
+        expect(await ask(route, p), `${route} ${p}`).toEqual({ status: 200, code: null });
+      }
     }
+    expect(launched).toHaveLength(4);
   });
 
-  it("GET /api/local-file allows absolute paths inside the brain, except .git", async () => {
-    expect(await (await localFile(path.join(root, "files", "invoice.pdf"))).text()).toBe(INVOICE_PDF);
-    expect((await localFile(path.join(root, ".git", "config"))).status).toBe(403);
-    expect((await localFile(path.join(root, ".GIT", "config").replace(/\\/g, "/"))).status).toBe(403);
-  });
-
-  it("GET /api/local-file returns 404 for missing files and folders, 400 for malformed paths", async () => {
-    expect((await localFile(path.join(outside, "Missing.pdf"))).status).toBe(404);
-    expect((await localFile(outside)).status).toBe(404);
-    expect((await app.request("/api/local-file")).status).toBe(400);
-    for (const p of ["\\\\server\\share\\Module 1.pdf", `${pdf}:hidden`, "Module 1.pdf", path.join(outside, "Up") + "\\..\\Module 1.pdf"]) {
-      expect((await localFile(p)).status, p).toBe(400);
+  it("open and reveal refuse unmentioned paths and paths written only in code blocks or inside a link", async () => {
+    for (const route of ["open", "reveal"] as const) {
+      for (const name of ["Unmentioned.pdf", "Fenced.pdf", "Tilde.pdf", "Indented.pdf", "Linked.pdf"]) {
+        expect(await ask(route, at(name)), `${route} ${name}`).toEqual({ status: 403, code: "forbidden" });
+      }
     }
+    expect(launched).toEqual([]);
+  });
+
+  it("open and reveal allow absolute paths inside the brain, except .git however it is spelled", async () => {
+    for (const route of ["open", "reveal"] as const) {
+      expect(await ask(route, path.join(root, "files", "invoice.pdf")), route).toEqual({ status: 200, code: null });
+      expect(await ask(route, path.join(root, ".git", "config")), route).toEqual({ status: 403, code: "forbidden" });
+      expect(await ask(route, path.join(root, ".GIT", "config").replace(/\\/g, "/")), route).toEqual({ status: 403, code: "forbidden" });
+      expect(await ask(route, path.join(root, ".git")), route).toEqual({ status: 403, code: "forbidden" });
+    }
+    expect(launched.map((l) => l.path)).toEqual([path.join(root, "files", "invoice.pdf"), path.join(root, "files", "invoice.pdf")]);
+  });
+
+  it("open and reveal answer 404 for a missing mentioned file and 400 for malformed paths", async () => {
+    const malformed = ["\\\\server\\share\\Module 1.pdf", "//server/share/Module 1.pdf", "\\\\?\\C:\\x.pdf", `${pdf}:hidden`, "Module 1.pdf", `${path.join(outside, "Up")}\\..\\Module 1.pdf`, `${outside}\\a?.pdf`];
+    for (const route of ["open", "reveal"] as const) {
+      expect(await ask(route, at("Missing.pdf")), route).toEqual({ status: 404, code: "not_found" });
+      for (const p of malformed) expect(await ask(route, p), `${route} ${p}`).toEqual({ status: 400, code: "validation" });
+    }
+    expect(launched).toEqual([]);
   });
 
   it("POST /api/open opens mentioned pdfs and folders but refuses programs and shortcuts", async () => {
@@ -986,6 +1351,7 @@ describe("maintenance", () => {
       missingFiles: [{ from: "dangling", file: "files/missing.pdf" }],
       missingSources: [{ from: "dangling", source: "gone" }],
       invalidNotes: [],
+      missingPins: [],
       // The root hub lists ryzen-laptop-specs; nothing lists dangling. Hubs and sources are never reported.
       notesWithoutHub: [{ slug: "dangling" }],
       notesInSeveralHubs: [],
@@ -1067,7 +1433,10 @@ describe("response shapes", () => {
     await tb.addFile("notes/junk.md", "no frontmatter here\n");
     await tb.addFile("inbox/talk.md", "hello");
     await tb.addFile("inbox/photo.png", Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 0]));
+    await tb.addFile("pins.yml", "home: [ryzen-laptop-specs, gone-pin]\n");
     const noteInput = { frontmatter: { title: "Shape note", type: "note", summary: "s", tags: ["laptop"] }, body: "[[index]]" };
+    const put = (url: string, body: unknown) => app.request(url, { ...json(body), method: "PUT" });
+    const bothPinLists = pinnedNotesSchema.extend({ home: z.array(noteSummarySchema).nonempty(), sidebar: z.array(noteSummarySchema).nonempty() });
 
     const cases: Array<[string, () => Response | Promise<Response>, number, z.ZodType]> = [
       ["GET /api/notes", () => app.request("/api/notes"), 200, notePageSchema],
@@ -1081,6 +1450,9 @@ describe("response shapes", () => {
       ["GET /api/search (files)", () => app.request("/api/search?q=invoice&mode=keyword"), 200, searchPageSchema],
       ["GET /api/tags", () => app.request("/api/tags"), 200, z.array(tagWithCountSchema).nonempty()],
       ["POST /api/tags", () => app.request("/api/tags", json({ name: "gpu", description: "Graphics cards" })), 201, tagSchema],
+      ["PUT /api/pins/:target", () => put("/api/pins/sidebar", { slug: "laptops", pinned: true }), 200, pinnedNotesSchema],
+      ["PUT /api/pins/:target/order", () => put("/api/pins/home/order", { slugs: ["ryzen-laptop-specs"] }), 200, pinnedNotesSchema],
+      ["GET /api/pins", () => app.request("/api/pins"), 200, bothPinLists],
       ["GET /api/inbox", () => app.request("/api/inbox"), 200, z.array(inboxItemSchema).nonempty()],
       ["POST /api/inbox", () => app.request("/api/inbox", json({ name: "dropped.md", content: "x" })), 201, inboxItemSchema],
       ["POST /api/inbox/take (source)", () => app.request("/api/inbox/take", json({ name: "talk.md", title: "Talk" })), 200, inboxTakeResultSchema],
@@ -1108,6 +1480,11 @@ describe("response shapes", () => {
     await tb.addFile("notes/junk.md", "no frontmatter here\n");
     vi.spyOn(brain, "stats").mockRejectedValueOnce(new Error("disk on fire"));
     const hub = { frontmatter: { title: "Index", type: "hub", summary: "s", tags: [] }, body: "", expectedMtimeMs: 1 };
+    const exportPdf = (prepare: () => void) => () => {
+      printer.reset();
+      prepare();
+      return app.request("/api/notes/index/export.pdf");
+    };
     const cases: Array<[string, () => Response | Promise<Response>, number]> = [
       ["validation", () => app.request("/api/search"), 400],
       ["forbidden", () => app.request("/api/health", { headers: { host: "evil.com" } }), 403],
@@ -1118,6 +1495,8 @@ describe("response shapes", () => {
       ["range_not_satisfiable", () => app.request("/api/files/invoice.pdf", { headers: { range: "bytes=999999-" } }), 416],
       ["invalid_note", () => app.request("/api/notes/junk"), 422],
       ["internal", () => app.request("/api/stats"), 500],
+      ["export_failed", exportPdf(() => (printer.ready = async () => ({ ready: "error", error: "boom" }))), 500],
+      ["pdf_unavailable", exportPdf(() => (printer.launchError = new Error("no Edge"))), 503],
     ];
     for (const [code, send, status] of cases) {
       expect(await shapeOf(await send(), errorEnvelopeSchema), code).toEqual({ status, drift: [] });

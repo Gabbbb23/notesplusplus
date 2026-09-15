@@ -235,9 +235,11 @@ describe("MCP server", () => {
         "inbox_list",
         "inbox_take",
         "list_notes",
+        "list_pins",
         "list_tags",
         "rename_note",
         "search",
+        "set_pin",
         "stats",
         "write_note",
       ].sort(),
@@ -384,6 +386,7 @@ describe("MCP server", () => {
         missingFiles: [],
         missingSources: [{ from: "a", source: "s" }],
         invalidNotes: [{ path: "notes/x.md", error: "missing title" }],
+        missingPins: ["gone", "lost"],
         notesWithoutHub: [{ slug: "a" }, { slug: "c" }],
         notesInSeveralHubs: [{ slug: "d", hubs: ["h1", "h2"] }],
       }),
@@ -395,6 +398,9 @@ describe("MCP server", () => {
         "  a -> s",
         "Invalid notes:",
         "  notes/x.md: missing title",
+        "Pins with no note:",
+        "  gone",
+        "  lost",
         "Notes no hub lists:",
         "  a",
         "  c",
@@ -452,6 +458,95 @@ describe("MCP server", () => {
 
     const garden = await mcp.getPrompt({ name: "garden" });
     expect((garden.messages[0]!.content as { text: string }).text).toContain("Test garden skill.");
+  });
+});
+
+describe("pins through MCP", () => {
+  let tb: TempBrain;
+  let app: Hono;
+  let mcp: Client;
+  const calls: Recorded[] = [];
+
+  beforeAll(async () => {
+    tb = await seeded.copy();
+    const wired = clientFor(tb.brain, calls);
+    app = wired.app;
+    mcp = await connectMcp(wired.client);
+  });
+
+  afterAll(async () => {
+    await mcp.close();
+    await tb.dispose();
+  });
+
+  const setPin = (args: Record<string, unknown>) => mcp.callTool({ name: "set_pin", arguments: args });
+
+  it("set_pin says to pin only when the owner asks, and takes its inputs from the contract", async () => {
+    const { tools } = await mcp.listTools();
+    const tool = tools.find((t) => t.name === "set_pin")!;
+    expect(tool.description).toContain("Use it only when the owner asks to pin or unpin something");
+    expect(tool.inputSchema).toMatchObject({
+      properties: { target: { enum: ["home", "sidebar"] }, pinned: { type: "boolean" }, slug: { type: "string", pattern: "^[a-z0-9]+(-[a-z0-9]+)*$" } },
+      required: expect.arrayContaining(["slug", "target", "pinned"]),
+    });
+    expect(tools.find((t) => t.name === "list_pins")?.annotations?.readOnlyHint).toBe(true);
+  });
+
+  it("set_pin pins and unpins through the REST app, and list_pins lists Home pins then sidebar pins", async () => {
+    expect(textOf(await mcp.callTool({ name: "list_pins", arguments: {} }))).toBe("No pins.");
+
+    const first = await setPin({ slug: "ryzen-laptop-specs", target: "home", pinned: true });
+    expect(first.isError).toBeFalsy();
+    expect(textOf(first)).toBe("ryzen-laptop-specs is pinned to home.\nHome:\n  ryzen-laptop-specs — note — Ryzen laptop specs\nSidebar: none");
+    const call = calls.at(-1)!;
+    expect([call.method, call.url.pathname, call.body, call.headers.get("X-Brain-Tool")]).toEqual([
+      "PUT",
+      "/api/pins/home",
+      { slug: "ryzen-laptop-specs", pinned: true },
+      "mcp",
+    ]);
+    expect((await tb.commits())[0]).toBe("mcp: pin ryzen-laptop-specs to home");
+
+    await setPin({ slug: "laptop-transcript", target: "sidebar", pinned: true });
+    await setPin({ slug: "index", target: "home", pinned: true });
+    const list = await mcp.callTool({ name: "list_pins", arguments: {} });
+    expect(textOf(list).split("\n")).toEqual([
+      "Home:",
+      "  ryzen-laptop-specs — note — Ryzen laptop specs",
+      "  index — hub — Index",
+      "Sidebar:",
+      "  laptop-transcript — source — Laptop transcript",
+    ]);
+    expect(list.structuredContent).toEqual(await (await app.request("/api/pins")).json());
+
+    const unpinned = await setPin({ slug: "ryzen-laptop-specs", target: "home", pinned: false });
+    expect(textOf(unpinned).split("\n")).toEqual([
+      "ryzen-laptop-specs is not pinned to home.",
+      "Home:",
+      "  index — hub — Index",
+      "Sidebar:",
+      "  laptop-transcript — source — Laptop transcript",
+    ]);
+    expect((await tb.commits()).slice(0, 4)).toEqual([
+      "mcp: unpin ryzen-laptop-specs from home",
+      "mcp: pin index to home",
+      "mcp: pin laptop-transcript to sidebar",
+      "mcp: pin ryzen-laptop-specs to home",
+    ]);
+
+    const unknown = await setPin({ slug: "nope", target: "home", pinned: true });
+    expect([unknown.isError, textOf(unknown)]).toEqual([true, "note nope not found"]);
+    const before = calls.length;
+    const badTarget = await setPin({ slug: "index", target: "top", pinned: true });
+    expect(badTarget.isError).toBe(true);
+    expect(textOf(badTarget)).toContain("Input validation error");
+    expect(calls.length).toBe(before);
+  });
+
+  it("check_links lists a pinned slug whose note is gone", async () => {
+    await tb.addFile("pins.yml", "home: [index, gone-note]\nsidebar: [gone-note]\n");
+    expect(textOf(await mcp.callTool({ name: "check_links", arguments: {} }))).toBe("Pins with no note:\n  gone-note\nNotes no hub lists:\n  ryzen-laptop-specs");
+    expect(textOf(await mcp.callTool({ name: "list_pins", arguments: {} }))).toBe("Home:\n  index — hub — Index\nSidebar: none");
   });
 });
 

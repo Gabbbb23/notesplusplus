@@ -4,14 +4,18 @@ import { Hono, type Context, type MiddlewareHandler } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { z } from "zod";
 import {
+  MARKDOWN_EXPORT_TYPE,
+  PDF_EXPORT_TYPE,
   createTagInputSchema,
   inboxAddInputSchema,
   inboxTakeInputSchema,
-  localFileQuerySchema,
   noteListQuerySchema,
   pathInputSchema,
+  pdfExportFileName,
   renameInputSchema,
+  reorderPinsInputSchema,
   searchQuerySchema,
+  setPinInputSchema,
   writeNoteInputSchema,
 } from "../core/contract/index.ts";
 import {
@@ -27,15 +31,24 @@ import {
   type TagWithCount,
   type WriteMeta,
 } from "../core/types.ts";
-import { fileResponse } from "./file-response.ts";
+import { config } from "../config.ts";
+import { contentDisposition, fileResponse } from "./file-response.ts";
 import { createLauncher, type Launcher } from "./launcher.ts";
 import { isOpenable, resolveAllowedPath } from "./local-paths.ts";
+import { createEdgeBrowser, createPdfExporter, type PrintBrowser } from "./pdf-export.ts";
 
 export interface ApiOptions {
   /** Folder holding conventions.md, file.md, and garden.md. */
   conventionsDir: string;
   /** Starts programs for /api/open and /api/reveal. Defaults to the real one for this platform. */
   launcher?: Launcher;
+  /** Starts the browser that prints notes for /api/notes/:slug/export.pdf. Defaults to installed Microsoft Edge. */
+  printBrowser?: PrintBrowser;
+  /**
+   * The port this server listens on, read when a PDF export starts, so Edge opens this server's own print page.
+   * Defaults to config.port.
+   */
+  listenPort?: () => number;
 }
 
 const CONVENTION_NAMES = new Set(["conventions", "file", "garden"]);
@@ -75,7 +88,7 @@ const requestGuard: MiddlewareHandler = async (c, next) => {
     throw new ForbiddenError(`origin ${origin} is not allowed`);
   }
   // A JSON content type forces a CORS preflight, which a plain form post from another page cannot pass.
-  if (c.req.method === "POST" && (c.req.path === "/api/open" || c.req.path === "/api/reveal")) {
+  if (needsJsonBody(c.req.method, c.req.path)) {
     const mediaType = (c.req.header("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
     if (mediaType !== "application/json") {
       throw new BrainError("Content-Type must be application/json", 415, "unsupported_media_type");
@@ -83,6 +96,12 @@ const requestGuard: MiddlewareHandler = async (c, next) => {
   }
   await next();
 };
+
+/** Requests that launch programs or that the web UI sends to write the brain: POST open and reveal, PUT pins. */
+function needsJsonBody(method: string, path: string): boolean {
+  if (method === "POST") return path === "/api/open" || path === "/api/reveal";
+  return method === "PUT" && path.startsWith("/api/pins/");
+}
 
 /**
  * One message for every problem, each once. A contract rule's message names its field ("limit must be ...") and is
@@ -116,6 +135,16 @@ async function parseBody<S extends z.ZodType>(c: Context, schema: S): Promise<z.
   return parseWith(schema, await readJson(c));
 }
 
+/**
+ * The JSON body with the path parameters laid over it, read with one contract schema, so every problem with either
+ * comes back in one message. A field the path sets is taken from the path, never the body.
+ */
+async function parseBodyAndPath<S extends z.ZodType>(c: Context, schema: S, fromPath: Record<string, string>): Promise<z.output<S>> {
+  const body = await readJson(c);
+  const isObject = typeof body === "object" && body !== null && !Array.isArray(body);
+  return parseWith(schema, isObject ? { ...body, ...fromPath } : body);
+}
+
 /** The query string read with a contract schema, which also turns numbers and flags into values and fills defaults. */
 function parseQuery<S extends z.ZodType>(c: Context, schema: S): z.output<S> {
   return parseWith(schema, c.req.query());
@@ -138,6 +167,10 @@ function withCounts(tags: Tag[], notes: NoteSummary[]): TagWithCount[] {
 export function createApi(brain: Brain, opts: ApiOptions): Hono {
   const app = new Hono();
   const launcher = opts.launcher ?? createLauncher();
+  const pdfExporter = createPdfExporter({
+    browser: opts.printBrowser ?? createEdgeBrowser(),
+    listenPort: opts.listenPort ?? (() => config.port),
+  });
 
   app.onError((err, c) => {
     if (err instanceof BrainError) {
@@ -172,10 +205,7 @@ export function createApi(brain: Brain, opts: ApiOptions): Hono {
 
   app.put("/api/notes/:slug", async (c) => {
     // The slug comes from the path, never the body, and follows the same rule as a slug in the body of POST.
-    const body = await readJson(c);
-    const slug = c.req.param("slug");
-    const isObject = typeof body === "object" && body !== null && !Array.isArray(body);
-    const input = parseWith(writeNoteInputSchema, isObject ? { ...body, slug } : body);
+    const input = await parseBodyAndPath(c, writeNoteInputSchema, { slug: c.req.param("slug") });
     return c.json(await brain.write(input, metaFrom(c)));
   });
 
@@ -201,6 +231,26 @@ export function createApi(brain: Brain, opts: ApiOptions): Hono {
     return c.json(trail);
   });
 
+  app.get("/api/notes/:slug/export.md", async (c) => {
+    const slug = c.req.param("slug");
+    const note = await brain.get(slug);
+    if (!note) throw new NotFoundError(`note ${slug}`);
+    // The bytes on disk, not note.raw, so the export is the file exactly as stored.
+    const bytes = await fs.promises.readFile(brain.resolve(note.path));
+    return c.body(bytes, 200, { "Content-Type": MARKDOWN_EXPORT_TYPE, "Content-Disposition": `attachment; filename="${note.slug}.md"` });
+  });
+
+  app.get("/api/notes/:slug/export.pdf", async (c) => {
+    const slug = c.req.param("slug");
+    const note = await brain.get(slug);
+    if (!note) throw new NotFoundError(`note ${slug}`);
+    const pdf = await pdfExporter.print({ slug: note.slug, title: note.title });
+    return c.body(pdf, 200, {
+      "Content-Type": PDF_EXPORT_TYPE,
+      "Content-Disposition": contentDisposition(pdfExportFileName(note.title, note.slug), "attachment"),
+    });
+  });
+
   // ---- search ----
 
   app.get("/api/search", async (c) => {
@@ -221,6 +271,20 @@ export function createApi(brain: Brain, opts: ApiOptions): Hono {
   app.post("/api/tags", async (c) => {
     const tag = await parseBody(c, createTagInputSchema);
     return c.json(await brain.createTag(tag, metaFrom(c)), 201);
+  });
+
+  // ---- pins ----
+
+  app.get("/api/pins", async (c) => c.json(await brain.pins()));
+
+  app.put("/api/pins/:target", async (c) => {
+    const { target, slug, pinned } = await parseBodyAndPath(c, setPinInputSchema, { target: c.req.param("target") });
+    return c.json(await brain.setPin(slug, target, pinned, metaFrom(c)));
+  });
+
+  app.put("/api/pins/:target/order", async (c) => {
+    const { target, slugs } = await parseBodyAndPath(c, reorderPinsInputSchema, { target: c.req.param("target") });
+    return c.json(await brain.reorderPins(target, slugs, metaFrom(c)));
   });
 
   // ---- inbox ----
@@ -256,14 +320,7 @@ export function createApi(brain: Brain, opts: ApiOptions): Hono {
     return fileResponse(c, abs, stat.size);
   });
 
-  // Files outside the brain, allowed when a note mentions them (Brain.isMentioned). See local-paths.ts.
-  app.get("/api/local-file", async (c) => {
-    const { path: requested } = parseQuery(c, localFileQuerySchema);
-    const { abs, stat } = await resolveAllowedPath(brain, requested);
-    if (!stat.isFile()) throw new NotFoundError(`file ${requested}`);
-    return fileResponse(c, abs, stat.size);
-  });
-
+  // Files outside the brain are allowed when a note mentions them (Brain.isMentioned). See local-paths.ts.
   app.post("/api/open", async (c) => {
     const { path: requested } = await parseBody(c, pathInputSchema);
     const { abs, stat } = await resolveAllowedPath(brain, requested);

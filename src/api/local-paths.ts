@@ -1,5 +1,5 @@
 /**
- * Which files the web UI may view, open, or reveal. The server decides; the UI only asks.
+ * Which files the web UI may open or reveal. The server decides; the UI only asks.
  *
  * This module holds only request-level concerns. A request names a brain attachment (`files/...`) or a drive-letter
  * absolute path. An absolute path is allowed when it lies inside the brain, or when Brain.isMentioned says some note

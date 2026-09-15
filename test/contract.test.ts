@@ -8,17 +8,25 @@ import type { Hono } from "hono";
 import type { z } from "zod";
 import { createApi } from "../src/api/index.ts";
 import {
+  EXPORT_NAME_MAX_CHARS,
   NOTE_TYPES,
+  PIN_TARGETS,
+  PINS_MAX,
   SEARCH_MODES,
   SUMMARY_MAX_CHARS,
   noteListLimitSchema,
   noteListQuerySchema,
   noteTypeSchema,
   offsetSchema,
+  pdfExportFileName,
+  pinLimitProblem,
+  pinTargetSchema,
+  reorderPinsInputSchema,
   searchLimitSchema,
   searchModeSchema,
   searchQueryParams,
   searchQuerySchema,
+  setPinInputSchema,
   slugSchema,
   summarySchema,
   tagNameSchema,
@@ -128,6 +136,54 @@ describe("enums", () => {
     expect(noteTypeSchema.safeParse("page").success).toBe(false);
     expect(searchModeSchema.safeParse("psychic").success).toBe(false);
   });
+
+  it("pin targets, and the pin limit", () => {
+    expect(PIN_TARGETS).toEqual(["home", "sidebar"]);
+    for (const target of PIN_TARGETS) expect(pinTargetSchema.parse(target)).toBe(target);
+    for (const target of ["Home", "top", "", undefined]) expect(problems(pinTargetSchema, target), String(target)).toEqual(["target must be one of home, sidebar"]);
+    expect(PINS_MAX).toBe(50);
+    expect(pinLimitProblem("sidebar")).toBe("sidebar already holds 50 pins, the most it can hold. Unpin one first.");
+  });
+});
+
+describe("pin requests", () => {
+  it("PUT /api/pins/:target takes a target, a slug, and pinned, and names every problem", () => {
+    expect(setPinInputSchema.parse({ target: "home", slug: "ge09", pinned: false })).toEqual({ target: "home", slug: "ge09", pinned: false });
+    expect(problems(setPinInputSchema, { target: "top", slug: "GE09", pinned: "yes" })).toEqual([
+      "target must be one of home, sidebar",
+      'slug "GE09" must match /^[a-z0-9]+(-[a-z0-9]+)*$/',
+      "Invalid input: expected boolean, received string",
+    ]);
+  });
+
+  it("PUT /api/pins/:target/order takes a target and a list of slugs", () => {
+    expect(reorderPinsInputSchema.parse({ target: "sidebar", slugs: [] })).toEqual({ target: "sidebar", slugs: [] });
+    expect(problems(reorderPinsInputSchema, { target: "sidebar", slugs: ["ok", "Not OK"] })).toEqual(['slug "Not OK" must match /^[a-z0-9]+(-[a-z0-9]+)*$/']);
+    expect(problems(reorderPinsInputSchema, { target: "sidebar", slugs: "ok" })).toHaveLength(1);
+  });
+});
+
+describe("PDF export file name", () => {
+  it("drops the characters Windows forbids and control characters, and collapses whitespace", () => {
+    const cases: Array<[string, string]> = [
+      ["Prelims: when? Week 7", "Prelims when Week 7.pdf"],
+      ['a\\b/c:d*e?f"g<h>i|j', "abcdefghij.pdf"],
+      ["  Tabs\tand\nnew lines   and  spaces  ", "Tabs and new lines and spaces.pdf"],
+      ["Bell\x07 and \x9fC1 control", "Bell and C1 control.pdf"],
+      ["A : B", "A B.pdf"],
+      ["Résumé (final) — 2026", "Résumé (final) — 2026.pdf"],
+    ];
+    for (const [title, name] of cases) expect(pdfExportFileName(title, "the-slug"), JSON.stringify(title)).toBe(name);
+  });
+
+  it(`cuts the name to ${EXPORT_NAME_MAX_CHARS} code points before .pdf, and falls back to the slug when nothing is left`, () => {
+    expect(EXPORT_NAME_MAX_CHARS).toBe(120);
+    expect(pdfExportFileName("é".repeat(130), "s")).toBe(`${"é".repeat(120)}.pdf`);
+    expect(pdfExportFileName("🚀".repeat(121), "s")).toBe(`${"🚀".repeat(120)}.pdf`);
+    // A cut that ends on a space does not leave it before the extension.
+    expect(pdfExportFileName(`${"a".repeat(119)} bcd`, "s")).toBe(`${"a".repeat(119)}.pdf`);
+    expect(pdfExportFileName('???  :*"', "exam-schedule")).toBe("exam-schedule.pdf");
+  });
 });
 
 // ---- REST and MCP agree ------------------------------------------------------------------------------------------
@@ -208,6 +264,14 @@ describe("REST and MCP accept and refuse the same values", () => {
       mcp: (field, value) => ({ name: "drift", description: "d", [field]: value }),
       rest: (field, value) => json("POST", "/api/tags", { name: "drift", description: "d", [field]: value }),
     },
+    set_pin: {
+      // Unpinning a slug nothing pins is a no-op, so accepted values get 200; pinning no-such-note gets 404.
+      mcp: (field, value) => ({ slug: "no-such-note", target: "home", pinned: false, [field]: value }),
+      rest: (field, value) => {
+        const { target, ...body } = { slug: "no-such-note", target: "home", pinned: false, [field]: value };
+        return json("PUT", `/api/pins/${encodeURIComponent(String(target))}`, body);
+      },
+    },
   };
 
   const summary240 = "s".repeat(SUMMARY_MAX_CHARS);
@@ -230,6 +294,9 @@ describe("REST and MCP accept and refuse the same values", () => {
     ["inbox_take", "slug", ["talk-source"], ["Talk Source"]],
     ["inbox_take", "summary", [summary240], [summary241]],
     ["create_tag", "name", ["gpu"], ["GPU", "a b"]],
+    ["set_pin", "target", ["home", "sidebar"], ["Home", "top"]],
+    ["set_pin", "slug", ["no-such-note"], ["", "No Such", "no--such"]],
+    ["set_pin", "pinned", [true, false], ["yes", 1]],
   ];
 
   const cases = table.flatMap(([tool, field, accepted, refused]) => [
