@@ -1,8 +1,9 @@
 /**
  * Shared contracts for notesplusplus.
  *
- * Every module (store, index, api, web, mcp) builds against these types.
- * Change them only with care: four modules depend on them.
+ * Every module (store, index, api, mcp) builds against these types. The data types are inferred from the zod schemas
+ * in src/core/contract, the REST contract's one source of truth, so a field is declared once. The interfaces below
+ * describe modules (NoteStore, SearchIndex, Brain) and use those data types.
  *
  * Brain repo layout (BRAIN_PATH):
  *   notes/<slug>.md      type: note | hub   (notes/index.md is the root hub)
@@ -15,191 +16,52 @@
  * A slug is unique across notes/ and sources/. Links are [[slug]] or [[slug|label]]; src/core/graph/note-body.ts
  * decides what a body links to and mentions.
  */
+import type { z } from "zod";
+import type * as contract from "./contract/index.ts";
 
-export type NoteType = "note" | "hub" | "source";
+export type NoteType = z.infer<typeof contract.noteTypeSchema>;
+export type SearchMode = z.infer<typeof contract.searchModeSchema>;
 
 /** ISO date, YYYY-MM-DD. */
 export type IsoDate = string;
 
-export interface Frontmatter {
-  title: string;
-  type: NoteType;
-  /** One sentence an agent reads before deciding whether to open the note. */
-  summary: string;
-  /** Every tag must exist in tags.yml. */
-  tags: string[];
-  created: IsoDate;
-  updated: IsoDate;
-  /** Slugs of source notes this note was derived from. */
-  sources?: string[];
-  /** Paths relative to the brain root, e.g. "files/invoice.pdf". */
-  files?: string[];
-}
+export type Frontmatter = z.infer<typeof contract.frontmatterSchema>;
+/** Frontmatter as it arrives on write: created and updated are optional. */
+export type FrontmatterInput = z.infer<typeof contract.frontmatterInputSchema>;
+export type NoteSummary = z.infer<typeof contract.noteSummarySchema>;
+export type Note = z.infer<typeof contract.noteSchema>;
+export type InvalidNote = z.infer<typeof contract.invalidNoteSchema>;
+export type Tag = z.infer<typeof contract.tagSchema>;
+export type TagWithCount = z.infer<typeof contract.tagWithCountSchema>;
+export type InboxItem = z.infer<typeof contract.inboxItemSchema>;
+export type FileEntry = z.infer<typeof contract.fileEntrySchema>;
+export type StoreLinkReport = z.infer<typeof contract.storeLinkReportSchema>;
+export type HubMembershipReport = z.infer<typeof contract.hubMembershipReportSchema>;
+export type LinkReport = z.infer<typeof contract.linkReportSchema>;
+export type TrailHub = z.infer<typeof contract.trailHubSchema>;
+export type NoteTrail = z.infer<typeof contract.noteTrailSchema>;
+export type WriteNoteInput = z.infer<typeof contract.writeNoteInputSchema>;
+export type RenameResult = z.infer<typeof contract.renameResultSchema>;
+export type InboxTakeOptions = z.infer<typeof contract.inboxTakeOptionsSchema>;
+export type InboxTakeResult = z.infer<typeof contract.inboxTakeResultSchema>;
+export type ListFilter = z.infer<typeof contract.listFilterSchema>;
+export type NoteListOptions = z.infer<typeof contract.noteListOptionsSchema>;
+export type NotePage = z.infer<typeof contract.notePageSchema>;
+export type SearchOptions = z.infer<typeof contract.searchOptionsSchema>;
+export type SearchResult = z.infer<typeof contract.searchResultSchema>;
+export type SearchPage = z.infer<typeof contract.searchPageSchema>;
+export type BrainStats = z.infer<typeof contract.brainStatsSchema>;
+export type IndexStats = z.infer<typeof contract.indexStatsSchema>;
+export type ErrorEnvelope = z.infer<typeof contract.errorEnvelopeSchema>;
 
-/** The fields the store shows in lists and search results. Cheap to scan. */
-export interface NoteSummary {
-  slug: string;
-  /** Path relative to the brain root, e.g. "notes/ryzen-laptop-specs.md". */
-  path: string;
-  title: string;
-  type: NoteType;
-  summary: string;
-  tags: string[];
-  created: IsoDate;
-  updated: IsoDate;
-}
-
-export interface Note extends NoteSummary {
-  frontmatter: Frontmatter;
-  /** Markdown body without the frontmatter block. */
-  body: string;
-  /** Full file contents as on disk. */
-  raw: string;
-  /** Outgoing link targets (slugs), deduplicated, in order of first appearance. Never from code. */
-  links: string[];
-  /**
-   * Mentions: drive-letter absolute paths the body writes as inline code outside a markdown link, exactly as written,
-   * deduplicated, in order of first appearance. The web view gives these spans View, Open, and Show in folder.
-   */
-  mentions: string[];
-  /** File modification time, used for the write-conflict check. */
-  mtimeMs: number;
-}
-
-/** A file on disk under notes/ or sources/ that failed to parse or validate. Indexed loosely, reported, never crashed on. */
-export interface InvalidNote {
-  path: string;
-  error: string;
-}
-
-export interface Tag {
-  name: string;
-  description: string;
-}
-
-/** A tag as `GET /api/tags` returns it. */
-export interface TagWithCount extends Tag {
-  /** Notes of every type (note, hub, source) carrying the tag. */
-  count: number;
-}
-
-export interface InboxItem {
-  /** Filename inside inbox/, may include subfolders. */
-  name: string;
-  path: string;
-  sizeBytes: number;
-  mtimeMs: number;
-  /** True when the store can treat the contents as text and turn it into a source note. */
-  isText: boolean;
-}
-
-export interface FileEntry {
-  /** Path relative to the brain root, always starting with "files/". */
-  path: string;
-  sizeBytes: number;
-  mtimeMs: number;
-  /** Lowercased extension without the dot, e.g. "pdf". */
-  ext: string;
-}
-
-/** The problems `NoteStore.checkLinks` finds by reading every note file. */
-export interface StoreLinkReport {
-  brokenLinks: Array<{ from: string; to: string }>;
-  missingFiles: Array<{ from: string; file: string }>;
-  missingSources: Array<{ from: string; source: string }>;
-  invalidNotes: InvalidNote[];
-}
-
-/**
- * Hub membership, read from the index. Conventions put every note of type `note` in exactly one hub, so only those
- * are checked: hubs (the root hub included) and sources are never reported. A hub lists a note when its body links to
- * it; the root hub counts as a hub.
- */
-export interface HubMembershipReport {
-  /** Notes of type `note` that no hub links to, sorted by slug. */
-  notesWithoutHub: Array<{ slug: string }>;
-  /** Notes of type `note` that two or more hubs link to, sorted by slug, each with those hubs sorted by slug. */
-  notesInSeveralHubs: Array<{ slug: string; hubs: string[] }>;
-}
-
-export interface LinkReport extends StoreLinkReport, HubMembershipReport {}
-
-/** One hub in a note's breadcrumb trail. */
-export interface TrailHub {
-  slug: string;
-  title: string;
-}
-
-/** Where a note sits under the root hub `index`. */
-export interface NoteTrail {
-  /**
-   * Hubs from `index` down to the hub that links directly to the note, root first. Never includes the note.
-   * The shortest chain of hub links wins; on a tie, the hub linked first wins. Empty for `index` itself.
-   */
-  trail: TrailHub[];
-  /** False when no chain of hubs from `index` reaches the note, or `index` does not exist. */
-  inHub: boolean;
-}
-
-/** Who performed a write. Goes in the git commit message as "<tool>: <action> <slug>". */
+/** Who performed a write. Goes in the git commit message as "<tool>: <action> <slug>". Sent as the X-Brain-Tool header. */
 export interface WriteMeta {
   tool: string;
 }
 
-export interface WriteNoteInput {
-  /** Omit to derive from title. Must match /^[a-z0-9]+(-[a-z0-9]+)*$/ if given. */
-  slug?: string;
-  frontmatter: Omit<Frontmatter, "created" | "updated"> & Partial<Pick<Frontmatter, "created" | "updated">>;
-  body: string;
-  /**
-   * If set, the write fails with a ConflictError when the file on disk has a different mtime.
-   * Omit for a blind create-or-replace.
-   */
-  expectedMtimeMs?: number;
-}
-
-export interface RenameResult {
-  note: Note;
-  /** Slugs of notes whose wikilinks or sources lists were rewritten. */
-  rewritten: string[];
-}
-
-export interface InboxTakeResult {
-  /** "source" when the item became a source note; "file" when it was moved to files/. */
-  kind: "source" | "file";
-  note?: Note;
-  filePath?: string;
-}
-
-export interface ListFilter {
-  tag?: string;
-  type?: NoteType;
-}
-
-/** `limit` for `GET /api/notes`: default and maximum. The MCP list_notes tool caps its input at the same maximum. */
-export const NOTE_LIST_LIMIT = { default: 100, max: 500 } as const;
-
-/** `limit` for `GET /api/search`: default and maximum. The MCP search tool caps its input at the same maximum. */
-export const SEARCH_LIMIT = { default: 20, max: 100 } as const;
-
 /** The order of every note list: by title, then by slug when titles are equal, so pages never overlap or skip. */
 export function compareSummaries(a: Pick<NoteSummary, "title" | "slug">, b: Pick<NoteSummary, "title" | "slug">): number {
   return a.title.localeCompare(b.title) || a.slug.localeCompare(b.slug);
-}
-
-/** One page of `GET /api/notes`. */
-export interface NotePage {
-  items: NoteSummary[];
-  /** Every note matching the filters, across all pages. */
-  total: number;
-  limit: number;
-  offset: number;
-}
-
-/** `GET /api/search`: the top `limit` results, and whether more exist past them. */
-export interface SearchPage {
-  results: SearchResult[];
-  hasMore: boolean;
 }
 
 /**
@@ -232,7 +94,7 @@ export interface NoteStore {
    * a frontmatter header, and the given title (default: the filename). Other items move to files/.
    * The original is removed from inbox/. Commits.
    */
-  inboxTake(name: string, opts: { title?: string; slug?: string; summary?: string }, meta: WriteMeta): Promise<InboxTakeResult>;
+  inboxTake(name: string, opts: InboxTakeOptions, meta: WriteMeta): Promise<InboxTakeResult>;
   /** Write text into inbox/ as a new file. Used by the web UI drop box. Not committed. */
   inboxAdd(name: string, content: string): Promise<InboxItem>;
 
@@ -241,41 +103,6 @@ export interface NoteStore {
   resolve(relativePath: string): string;
 
   checkLinks(): Promise<StoreLinkReport>;
-}
-
-export type SearchMode = "hybrid" | "keyword" | "semantic";
-
-export interface SearchOptions {
-  limit?: number;
-  tag?: string;
-  type?: NoteType;
-  /** Default "hybrid". */
-  mode?: SearchMode;
-  /** Include file contents in results. Default true. */
-  includeFiles?: boolean;
-}
-
-export interface SearchResult {
-  kind: "note" | "file";
-  /** Slug for notes, brain-relative path for files. */
-  id: string;
-  path: string;
-  title: string;
-  /** Frontmatter summary for notes, empty for files. */
-  summary: string;
-  /** A short excerpt around the best match. */
-  snippet: string;
-  /** Higher is better. Comparable only within one result set. */
-  score: number;
-  tags: string[];
-  type?: NoteType;
-}
-
-export interface IndexStats {
-  notes: number;
-  files: number;
-  invalid: number;
-  durationMs: number;
 }
 
 /**
@@ -304,7 +131,7 @@ export interface SearchIndex {
   isMentioned(absolutePath: string): Promise<boolean>;
   hubMembership(): Promise<HubMembershipReport>;
   invalid(): Promise<InvalidNote[]>;
-  stats(): Promise<Omit<IndexStats, "durationMs">>;
+  stats(): Promise<BrainStats>;
 }
 
 /**
@@ -359,13 +186,13 @@ export interface Brain {
   createTag(tag: Tag, meta: WriteMeta): Promise<Tag>;
 
   inboxList(): Promise<InboxItem[]>;
-  inboxTake(name: string, opts: { title?: string; slug?: string; summary?: string }, meta: WriteMeta): Promise<InboxTakeResult>;
+  inboxTake(name: string, opts: InboxTakeOptions, meta: WriteMeta): Promise<InboxTakeResult>;
   inboxAdd(name: string, content: string): Promise<InboxItem>;
 
   files(): Promise<FileEntry[]>;
   /** Broken links, missing files and sources, and invalid notes from the files on disk; hub membership from the index. */
   checkLinks(): Promise<LinkReport>;
-  stats(): Promise<Omit<IndexStats, "durationMs">>;
+  stats(): Promise<BrainStats>;
 }
 
 /** Thrown by the store. `status` maps directly to an HTTP status in the API layer. */

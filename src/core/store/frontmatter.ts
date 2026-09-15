@@ -1,23 +1,14 @@
 import matter from "gray-matter";
 import { Document, type YAMLSeq } from "yaml";
+import { NOTE_TYPES, SUMMARY_MAX_CHARS, summaryLengthProblem } from "../contract/index.ts";
 import { ValidationError, type Frontmatter, type NoteType } from "../types.ts";
 import { isValidSlug } from "./slug.ts";
 
-export const NOTE_TYPES: readonly NoteType[] = ["note", "hub", "source"];
+// The note types and the summary limit are contract rules; strict writes here enforce the same ones.
+export { NOTE_TYPES, SUMMARY_MAX_CHARS, summaryLengthProblem };
+export type { FrontmatterInput } from "../types.ts";
+
 export const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-/** Longest summary a write accepts, in code points after trimming. Files already on disk may be longer. */
-export const SUMMARY_MAX_CHARS = 240;
-
-/** The reason a summary is too long to write, or null when it fits in SUMMARY_MAX_CHARS. */
-export function summaryLengthProblem(summary: string): string | null {
-  // Spread counts code points, so an emoji is one character rather than two UTF-16 units.
-  const chars = [...summary.trim()].length;
-  if (chars <= SUMMARY_MAX_CHARS) return null;
-  return `summary must be at most ${SUMMARY_MAX_CHARS} characters (got ${chars}). Name the one or two facts the note is about and leave lists of values to the body.`;
-}
-
-/** Frontmatter as it arrives on write: created/updated are optional. */
-export type FrontmatterInput = Omit<Frontmatter, "created" | "updated"> & Partial<Pick<Frontmatter, "created" | "updated">>;
 
 export interface ParsedFile {
   /** Raw frontmatter data with Dates normalized to YYYY-MM-DD strings. Not validated. */

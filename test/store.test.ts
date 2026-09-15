@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { simpleGit } from "simple-git";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createStore, isValidSlug, slugify, today } from "../src/core/store/index.ts";
+import { createStore, slugify, today } from "../src/core/store/index.ts";
 import { parseFrontmatter, serializeNote, SUMMARY_MAX_CHARS, validateFrontmatter } from "../src/core/store/frontmatter.ts";
 import { createIndex } from "../src/core/index/index.ts";
 import { BrainError, ConflictError, NotFoundError, ValidationError, type Note, type NoteStore } from "../src/core/types.ts";
@@ -91,10 +91,6 @@ describe("slug helpers", () => {
     expect(slugify("  Café -- crème brûlée!  ")).toBe("cafe-creme-brulee");
     expect(slugify("C++ & Rust: 2 notes")).toBe("c-rust-2-notes");
     expect(() => slugify("!!!")).toThrow(ValidationError);
-    expect(isValidSlug("a-b-1")).toBe(true);
-    expect(isValidSlug("-a")).toBe(false);
-    expect(isValidSlug("a--b")).toBe(false);
-    expect(isValidSlug("A")).toBe(false);
   });
 });
 

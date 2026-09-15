@@ -10,6 +10,7 @@ import {
   type FileEntry,
   type Frontmatter,
   type InboxItem,
+  type InboxTakeOptions,
   type InboxTakeResult,
   type InvalidNote,
   type ListFilter,
@@ -23,6 +24,7 @@ import {
   type WriteMeta,
   type WriteNoteInput,
 } from "../types.ts";
+import { slugProblem } from "../contract/index.ts";
 import { parseNoteBody, rewriteLinks } from "../graph/note-body.ts";
 import { parseFrontmatter, serializeNote, summaryLengthProblem, validateFrontmatter } from "./frontmatter.ts";
 import { GitRepo } from "./git.ts";
@@ -290,7 +292,7 @@ export class FileStore implements NoteStore {
         }
       }
     } else if (!isValidSlug(slug)) {
-      problems.push(`slug "${slug}" must match /^[a-z0-9]+(-[a-z0-9]+)*$/`);
+      problems.push(slugProblem("slug", slug));
     }
     if (slug === ROOT_HUB_SLUG && fmInput && fmInput.type !== "hub") {
       problems.push(`slug "${ROOT_HUB_SLUG}" is reserved for the root hub (type hub)`);
@@ -347,7 +349,7 @@ export class FileStore implements NoteStore {
   }
 
   async rename(oldSlug: string, newSlug: string, meta: WriteMeta): Promise<RenameResult> {
-    if (!isValidSlug(newSlug)) throw new ValidationError(`slug "${newSlug}" must match /^[a-z0-9]+(-[a-z0-9]+)*$/`);
+    if (!isValidSlug(newSlug)) throw new ValidationError(slugProblem("slug", newSlug));
     if (oldSlug === ROOT_HUB_SLUG || newSlug === ROOT_HUB_SLUG) {
       throw new ValidationError(`slug "${ROOT_HUB_SLUG}" is reserved for the root hub and cannot be renamed`);
     }
@@ -438,7 +440,7 @@ export class FileStore implements NoteStore {
   async createTag(tag: Tag, meta: WriteMeta): Promise<Tag> {
     const problems: string[] = [];
     const name = tag?.name;
-    if (!isValidSlug(name)) problems.push(`tag name "${String(name)}" must match /^[a-z0-9]+(-[a-z0-9]+)*$/`);
+    if (!isValidSlug(name)) problems.push(slugProblem("tag name", name));
     if (typeof tag?.description !== "string") problems.push("description must be a string");
     if (problems.length) throw new ValidationError(problems.join("; "));
 
@@ -503,7 +505,7 @@ export class FileStore implements NoteStore {
 
   async inboxTake(
     name: string,
-    opts: { title?: string; slug?: string; summary?: string },
+    opts: InboxTakeOptions,
     meta: WriteMeta,
   ): Promise<InboxTakeResult> {
     const cleanName = this.checkInboxName(name);
@@ -518,7 +520,7 @@ export class FileStore implements NoteStore {
         const title = opts.title ?? base.replace(/\.[^.]+$/, "");
         if (typeof title !== "string" || title.trim() === "") throw new ValidationError("title must be a non-empty string");
         const slug = opts.slug ?? slugify(title);
-        if (!isValidSlug(slug)) throw new ValidationError(`slug "${slug}" must match /^[a-z0-9]+(-[a-z0-9]+)*$/`);
+        if (!isValidSlug(slug)) throw new ValidationError(slugProblem("slug", slug));
         if (slug === ROOT_HUB_SLUG) throw new ValidationError(`slug "${ROOT_HUB_SLUG}" is reserved for the root hub`);
         if (await io(() => this.locate(slug), `locate ${slug}`)) throw new ValidationError(`slug ${slug} already exists`);
         const summary = opts.summary ?? "Unprocessed source. Read it and update this summary.";

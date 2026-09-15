@@ -1,38 +1,42 @@
 # REST API contract
 
-Base: `http://localhost:${PORT}`. The server listens on 127.0.0.1 only. JSON in, JSON out unless noted. Types refer to `src/core/types.ts`.
+> The source of truth is the contract module, `src/core/contract/`: one zod schema per request and response shape below, with the rules its fields follow (`rules.ts`) and the shapes in route order (`schemas.ts`). The REST server parses requests with those schemas, the MCP tools build their inputs from them, and `src/core/types.ts` infers its types from them. This page explains them in words. Where the two disagree, the schemas win and this page is wrong. `test/api.test.ts` checks that every route has a row in the table below and that every JSON response fits its schema.
+
+Base: `http://localhost:${PORT}`. The server listens on the loopback addresses 127.0.0.1 and ::1 only. JSON in, JSON out unless noted. Type names such as `NoteSummary` are the types `src/core/types.ts` infers from the schemas (`noteSummarySchema`).
 
 Every mutating request may send `X-Brain-Tool: <name>` (default `api`). It becomes the `WriteMeta.tool` in the git commit message.
 
-Errors: status from `BrainError.status` (400 validation, 403 forbidden, 404 not found, 409 conflict, 415 unsupported_media_type, 416 range_not_satisfiable), 500 otherwise. 409 `conflict` comes only from `expectedMtimeMs` (the file changed since it was read, or no longer exists). Name clashes are 400 `validation`: creating a tag that exists, renaming to a taken slug, or taking an inbox item onto a taken slug. Body:
+Errors: status from `BrainError.status` (400 validation, 403 forbidden, 404 not_found, 409 conflict, 415 unsupported_media_type, 416 range_not_satisfiable, 422 invalid_note for a note file on disk that does not parse), 500 otherwise (`io`, `git`, or `internal`). 409 `conflict` comes only from `expectedMtimeMs` (the file changed since it was read, or no longer exists). Name clashes are 400 `validation`: creating a tag that exists, renaming to a taken slug, or taking an inbox item onto a taken slug. Body (`errorEnvelopeSchema`):
 
 ```json
 { "error": { "code": "validation", "message": "unknown tags: foo. Create them with createTag first." } }
 ```
 
+A request that does not fit its schema gets one 400 `validation` message listing every problem, separated by `; `. A message from a contract rule names its field and stands alone (`limit must be an integer from 1 to 500`); any other message gets the field's path in front (`frontmatter.type: Invalid option: expected one of "note"|"hub"|"source"`). Problems the store finds against the brain, such as unknown tags, are reported only once the request fits its schema.
+
 | Method | Path | Body | Response |
 |---|---|---|---|
 | GET | `/api/notes?tag=&type=&limit=&offset=` | | `NotePage`: `{ items: NoteSummary[], total, limit, offset }`, see [Note lists](#note-lists). |
-| POST | `/api/notes` | `WriteNoteInput` | `Note` (201). Slug derived from title if absent. |
+| POST | `/api/notes` | `WriteNoteInput` | `Note` (201). Slug derived from title if absent. See [Frontmatter validation](#frontmatter-validation). |
 | GET | `/api/notes/:slug` | | `Note`, with `links` and `mentions`, see [Links and mentions](#links-and-mentions). |
-| PUT | `/api/notes/:slug` | `{ frontmatter, body, expectedMtimeMs? }` | `Note`. Create or replace at this slug. |
+| PUT | `/api/notes/:slug` | `{ frontmatter, body, expectedMtimeMs? }` | `Note`. Create or replace at this slug, which must match the slug pattern. A `slug` in the body is ignored. |
 | DELETE | `/api/notes/:slug` | | 204 |
-| POST | `/api/notes/:slug/rename` | `{ newSlug }` | `RenameResult` |
+| POST | `/api/notes/:slug/rename` | `{ newSlug }` | `RenameResult`. `newSlug` must match the slug pattern. |
 | GET | `/api/notes/:slug/backlinks` | | `NoteSummary[]` |
 | GET | `/api/notes/:slug/trail` | | `NoteTrail`, the hubs above a note or source, see [Trail](#trail). 404 for an unknown slug. |
-| GET | `/api/search?q=&limit=&tag=&type=&mode=&files=` | | `SearchPage`: `{ results: SearchResult[], hasMore }`, see [Search results](#search-results). `mode` hybrid/keyword/semantic, `files` true/false. |
+| GET | `/api/search?q=&limit=&tag=&type=&mode=&files=` | | `SearchPage`: `{ results: SearchResult[], hasMore }`, see [Search results](#search-results). `mode` hybrid/keyword/semantic. `files=false` leaves files out; `true`, absent, or any other value keeps them. |
 | GET | `/api/tags` | | `TagWithCount[]`: each `Tag` plus `count`, see [Tag counts](#tag-counts). |
-| POST | `/api/tags` | `Tag` | `Tag` (201) |
+| POST | `/api/tags` | `Tag` | `Tag` (201). `name` must match the slug pattern. |
 | GET | `/api/inbox` | | `InboxItem[]` |
 | POST | `/api/inbox` | `{ name, content }` | `InboxItem` (201). Used by the web drop box too. |
-| POST | `/api/inbox/take` | `{ name, title?, slug?, summary? }` | `InboxTakeResult` |
+| POST | `/api/inbox/take` | `{ name, title?, slug?, summary? }` | `InboxTakeResult`. `slug` must match the slug pattern and `summary` fits the [summary limit](#frontmatter-validation). |
 | GET | `/api/files` | | `FileEntry[]` |
 | GET | `/api/files/*` | | Raw file bytes, see [File responses](#file-responses). Read-only. Path traversal rejected. |
 | GET | `/api/local-file?path=` | | Raw file bytes for an allowed absolute path, see [File responses](#file-responses) and [Paths](#paths). 404 for a folder. |
 | POST | `/api/open` | `{ path }` | `{ opened: "<absolute path>" }`. Opens a file in its default app or a folder in File Explorer. 403 when the file type is not on the open allowlist. |
 | POST | `/api/reveal` | `{ path }` | `{ revealed: "<absolute path>" }`. Opens File Explorer with the file selected, or opens the folder. Any file type. |
 | GET | `/api/check-links` | | `LinkReport`, see [Check links](#check-links). |
-| GET | `/api/stats` | | `{ notes, files, invalid }` |
+| GET | `/api/stats` | | `BrainStats`: `{ notes, files, invalid }` |
 | POST | `/api/reindex` | | `IndexStats` |
 | GET | `/api/conventions` | | `text/markdown`, contents of `conventions/conventions.md` |
 | GET | `/api/conventions/:name` | | `text/markdown`. `name` is `conventions`, `file`, or `garden`. 404 otherwise. |
@@ -64,7 +68,7 @@ The web UI lives on the same server under `/` (not `/api`).
 }
 ```
 
-- `limit` is an integer from 1 to 500, default 100. `offset` is an integer of 0 or more, default 0. An empty value takes the default. Anything else, such as `limit=0`, `limit=501`, `offset=-1`, or `limit=abc`, gets 400 `validation`.
+- `limit` is an integer from 1 to 500, default 100 (`NOTE_LIST_LIMIT`). `offset` is an integer of 0 or more, default 0 (`OFFSET`). An empty value takes the default. Anything else, such as `limit=0`, `limit=501`, `offset=-1`, or `limit=abc`, gets 400 `validation`, one message naming each bad parameter. `type` must be note, hub, or source; an empty `tag` or `type` is ignored.
 - `items` are sorted by title, then by slug when titles are equal, so walking `offset` forward by `limit` visits every note once.
 - `total` counts every note matching `tag` and `type`, not only the ones on this page. `limit` and `offset` echo what was used.
 - An `offset` at or past the end gets `"items": []` with the real `total`.
@@ -96,10 +100,11 @@ The MCP `list_notes` tool asks for 50 notes at a time and ends its output with t
 }
 ```
 
-- `limit` is an integer from 1 to 100, default 20. 400 `validation` otherwise.
+- `q` is required and must hold more than whitespace. `limit` is an integer from 1 to 100, default 20 (`SEARCH_LIMIT`). 400 `validation` otherwise.
 - `results` holds at most `limit` results. `hasMore` is true when at least one more result exists past them; the server asks the index for `limit + 1` and drops the extra one.
+- `files` is the REST name of the search option `includeFiles`. Every other option keeps its name.
 
-The MCP `search` tool sends `limit` 10 unless the agent gives one, and refuses a `limit` over 100 before calling the server.
+The MCP `search` tool sends `limit` 10 unless the agent gives one. Its inputs are the same schemas, so it refuses what REST refuses (a `limit` over 100, a blank `query`, an unknown `type` or `mode`) before calling the server. It takes `includeFiles` (default true) and sends it as `files`.
 
 ## Tag counts
 
@@ -114,9 +119,13 @@ The MCP `search` tool sends `limit` 10 unless the agent gives one, and refuses a
 
 ## Frontmatter validation
 
-Writes are strict and reads are loose. `POST /api/notes` and `PUT /api/notes/:slug` answer 400 `validation` with every problem in one message when `title` or `summary` is empty, `type` is not note, hub, or source, a tag is not in the registry, `created` or `updated` is not YYYY-MM-DD, a `sources` entry is not a slug, or a `files` entry does not start with `files/`.
+Writes are strict and reads are loose. `POST /api/notes` and `PUT /api/notes/:slug` answer 400 `validation` when `title` or `summary` is empty, `type` is not note, hub, or source, the slug does not match the slug pattern, `summary` is over the limit below, a tag is not in the registry, `created` or `updated` is not YYYY-MM-DD, a `sources` entry is not a slug, or a `files` entry does not start with `files/`. `frontmatter` accepts no other fields.
 
-`summary` may be at most 240 characters (`SUMMARY_MAX_CHARS` in `src/core/store/frontmatter.ts`), counted as code points after trimming, so an emoji is one character. The same limit applies to `summary` in `POST /api/inbox/take`. The message gives the actual length:
+The checks run in two passes, and each pass puts every problem it finds in one message. First the request is parsed with `writeNoteInputSchema`: field types, `type`, the slug pattern, and the summary limit. Then the store checks the rest against the brain, and checks the slug and summary again for callers that do not come through REST. A request that fails the first pass never reaches the second, so a too-long summary and an unknown tag in the same request are reported one after the other.
+
+The slug pattern is `^[a-z0-9]+(-[a-z0-9]+)*$` (`SLUG_RE` in `src/core/contract/rules.ts`): lowercase letters and digits joined by single hyphens. Tag names follow it too.
+
+`summary` may be at most 240 characters (`SUMMARY_MAX_CHARS` in `src/core/contract/rules.ts`), counted as code points after trimming, so an emoji is one character. The same limit applies to `summary` in `POST /api/inbox/take`. The message gives the actual length:
 
 ```json
 { "error": { "code": "validation", "message": "summary must be at most 240 characters (got 312). Name the one or two facts the note is about and leave lists of values to the body." } }

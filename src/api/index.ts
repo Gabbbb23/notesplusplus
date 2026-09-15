@@ -2,20 +2,26 @@ import fs from "node:fs";
 import path from "node:path";
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import { z } from "zod";
+import type { z } from "zod";
+import {
+  createTagInputSchema,
+  inboxAddInputSchema,
+  inboxTakeInputSchema,
+  localFileQuerySchema,
+  noteListQuerySchema,
+  pathInputSchema,
+  renameInputSchema,
+  searchQuerySchema,
+  writeNoteInputSchema,
+} from "../core/contract/index.ts";
 import {
   BrainError,
   ForbiddenError,
-  NOTE_LIST_LIMIT,
   NotFoundError,
-  SEARCH_LIMIT,
   ValidationError,
   type Brain,
   type NotePage,
   type NoteSummary,
-  type NoteType,
-  type SearchMode,
-  type SearchOptions,
   type SearchPage,
   type Tag,
   type TagWithCount,
@@ -78,112 +84,46 @@ const requestGuard: MiddlewareHandler = async (c, next) => {
   await next();
 };
 
-const noteType = z.enum(["note", "hub", "source"]);
-
-const frontmatterInput = z
-  .object({
-    title: z.string(),
-    type: noteType,
-    summary: z.string(),
-    tags: z.array(z.string()),
-    created: z.string().optional(),
-    updated: z.string().optional(),
-    sources: z.array(z.string()).optional(),
-    files: z.array(z.string()).optional(),
-  })
-  .strict();
-
-const writeNoteInput = z.object({
-  slug: z.string().optional(),
-  frontmatter: frontmatterInput,
-  body: z.string(),
-  expectedMtimeMs: z.number().optional(),
-});
-
-const putNoteInput = z.object({
-  frontmatter: frontmatterInput,
-  body: z.string(),
-  expectedMtimeMs: z.number().optional(),
-});
-
-const renameInput = z.object({ newSlug: z.string() });
-const tagInput = z.object({ name: z.string(), description: z.string() });
-const inboxAddInput = z.object({ name: z.string(), content: z.string() });
-const inboxTakeInput = z.object({
-  name: z.string(),
-  title: z.string().optional(),
-  slug: z.string().optional(),
-  summary: z.string().optional(),
-});
-const pathInput = z.object({ path: z.string() });
-
+/**
+ * One message for every problem, each once. A contract rule's message names its field ("limit must be ...") and is
+ * used as it is; any other message gets the field's path in front ("frontmatter.type: Invalid option ...").
+ */
 function issuesToMessage(err: z.ZodError): string {
-  return err.issues
-    .map((i) => (i.path.length ? `${i.path.map(String).join(".")}: ${i.message}` : i.message))
-    .join("; ");
+  const messages = err.issues.map((i) => {
+    const field = i.path.at(-1);
+    if (i.path.length === 0 || (typeof field === "string" && i.message.startsWith(`${field} `))) return i.message;
+    return `${i.path.map(String).join(".")}: ${i.message}`;
+  });
+  return [...new Set(messages)].join("; ");
 }
 
-async function parseBody<T>(c: Context, schema: z.ZodType<T>): Promise<T> {
-  let raw: unknown;
+/** A request value read with a contract schema. 400 validation, naming every problem, when it does not fit. */
+function parseWith<S extends z.ZodType>(schema: S, value: unknown): z.output<S> {
+  const result = schema.safeParse(value);
+  if (!result.success) throw new ValidationError(issuesToMessage(result.error));
+  return result.data;
+}
+
+async function readJson(c: Context): Promise<unknown> {
   try {
-    raw = await c.req.json();
+    return await c.req.json();
   } catch {
     throw new ValidationError("invalid JSON body");
   }
-  const result = schema.safeParse(raw);
-  if (!result.success) throw new ValidationError(issuesToMessage(result.error));
-  return result.data;
+}
+
+async function parseBody<S extends z.ZodType>(c: Context, schema: S): Promise<z.output<S>> {
+  return parseWith(schema, await readJson(c));
+}
+
+/** The query string read with a contract schema, which also turns numbers and flags into values and fills defaults. */
+function parseQuery<S extends z.ZodType>(c: Context, schema: S): z.output<S> {
+  return parseWith(schema, c.req.query());
 }
 
 function metaFrom(c: Context): WriteMeta {
   const header = (c.req.header("x-brain-tool") ?? "").trim().slice(0, 64);
   return { tool: header === "" ? "api" : header };
-}
-
-function parseNoteType(value: string | undefined, what: string): NoteType | undefined {
-  if (value === undefined || value === "") return undefined;
-  const r = noteType.safeParse(value);
-  if (!r.success) throw new ValidationError(`${what} must be one of note, hub, source`);
-  return r.data;
-}
-
-/** An integer query parameter, or `fallback` when it is absent or empty. 400 when it is not an integer in range. */
-function parseIntQuery(c: Context, name: string, fallback: number, min: number, max?: number): number {
-  const raw = c.req.query(name);
-  if (raw === undefined || raw === "") return fallback;
-  const n = Number(raw);
-  if (!Number.isSafeInteger(n) || n < min || (max !== undefined && n > max)) {
-    throw new ValidationError(
-      max === undefined ? `${name} must be an integer of ${min} or more` : `${name} must be an integer from ${min} to ${max}`,
-    );
-  }
-  return n;
-}
-
-function parseSearchOptions(c: Context): { q: string; limit: number; opts: SearchOptions } {
-  const q = c.req.query("q");
-  if (q === undefined || q.trim() === "") throw new ValidationError("q is required");
-  const limit = parseIntQuery(c, "limit", SEARCH_LIMIT.default, 1, SEARCH_LIMIT.max);
-  const opts: SearchOptions = {};
-
-  const modeRaw = c.req.query("mode");
-  if (modeRaw !== undefined && modeRaw !== "") {
-    if (!["hybrid", "keyword", "semantic"].includes(modeRaw)) {
-      throw new ValidationError("mode must be one of hybrid, keyword, semantic");
-    }
-    opts.mode = modeRaw as SearchMode;
-  }
-
-  const files = c.req.query("files");
-  if (files === "false") opts.includeFiles = false;
-
-  const tag = c.req.query("tag");
-  if (tag) opts.tag = tag;
-
-  const type = parseNoteType(c.req.query("type"), "type");
-  if (type) opts.type = type;
-
-  return { q, limit, opts };
 }
 
 /** Each tag with the number of notes carrying it, counted in one pass over the list. */
@@ -211,10 +151,7 @@ export function createApi(brain: Brain, opts: ApiOptions): Hono {
   // ---- notes ----
 
   app.get("/api/notes", async (c) => {
-    const tag = c.req.query("tag") || undefined;
-    const type = parseNoteType(c.req.query("type"), "type");
-    const limit = parseIntQuery(c, "limit", NOTE_LIST_LIMIT.default, 1, NOTE_LIST_LIMIT.max);
-    const offset = parseIntQuery(c, "offset", 0, 0);
+    const { tag, type, limit, offset } = parseQuery(c, noteListQuerySchema);
     // The store still reads every note; paging trims the response, not the scan.
     const notes = await brain.list({ tag, type });
     const page: NotePage = { items: notes.slice(offset, offset + limit), total: notes.length, limit, offset };
@@ -222,7 +159,7 @@ export function createApi(brain: Brain, opts: ApiOptions): Hono {
   });
 
   app.post("/api/notes", async (c) => {
-    const input = await parseBody(c, writeNoteInput);
+    const input = await parseBody(c, writeNoteInputSchema);
     return c.json(await brain.write(input, metaFrom(c)), 201);
   });
 
@@ -234,9 +171,12 @@ export function createApi(brain: Brain, opts: ApiOptions): Hono {
   });
 
   app.put("/api/notes/:slug", async (c) => {
+    // The slug comes from the path, never the body, and follows the same rule as a slug in the body of POST.
+    const body = await readJson(c);
     const slug = c.req.param("slug");
-    const input = await parseBody(c, putNoteInput);
-    return c.json(await brain.write({ slug, ...input }, metaFrom(c)));
+    const isObject = typeof body === "object" && body !== null && !Array.isArray(body);
+    const input = parseWith(writeNoteInputSchema, isObject ? { ...body, slug } : body);
+    return c.json(await brain.write(input, metaFrom(c)));
   });
 
   app.delete("/api/notes/:slug", async (c) => {
@@ -245,7 +185,7 @@ export function createApi(brain: Brain, opts: ApiOptions): Hono {
   });
 
   app.post("/api/notes/:slug/rename", async (c) => {
-    const { newSlug } = await parseBody(c, renameInput);
+    const { newSlug } = await parseBody(c, renameInputSchema);
     return c.json(await brain.rename(c.req.param("slug"), newSlug, metaFrom(c)));
   });
 
@@ -264,9 +204,9 @@ export function createApi(brain: Brain, opts: ApiOptions): Hono {
   // ---- search ----
 
   app.get("/api/search", async (c) => {
-    const { q, limit, opts: searchOpts } = parseSearchOptions(c);
+    const { q, limit, options } = parseQuery(c, searchQuerySchema);
     // One extra result answers whether more exist without a second query.
-    const hits = await brain.search(q, { ...searchOpts, limit: limit + 1 });
+    const hits = await brain.search(q, { ...options, limit: limit + 1 });
     const page: SearchPage = { results: hits.slice(0, limit), hasMore: hits.length > limit };
     return c.json(page);
   });
@@ -279,7 +219,7 @@ export function createApi(brain: Brain, opts: ApiOptions): Hono {
   });
 
   app.post("/api/tags", async (c) => {
-    const tag = await parseBody(c, tagInput);
+    const tag = await parseBody(c, createTagInputSchema);
     return c.json(await brain.createTag(tag, metaFrom(c)), 201);
   });
 
@@ -288,12 +228,12 @@ export function createApi(brain: Brain, opts: ApiOptions): Hono {
   app.get("/api/inbox", async (c) => c.json(await brain.inboxList()));
 
   app.post("/api/inbox", async (c) => {
-    const { name, content } = await parseBody(c, inboxAddInput);
+    const { name, content } = await parseBody(c, inboxAddInputSchema);
     return c.json(await brain.inboxAdd(name, content), 201);
   });
 
   app.post("/api/inbox/take", async (c) => {
-    const { name, ...takeOpts } = await parseBody(c, inboxTakeInput);
+    const { name, ...takeOpts } = await parseBody(c, inboxTakeInputSchema);
     return c.json(await brain.inboxTake(name, takeOpts, metaFrom(c)));
   });
 
@@ -318,15 +258,14 @@ export function createApi(brain: Brain, opts: ApiOptions): Hono {
 
   // Files outside the brain, allowed when a note mentions them (Brain.isMentioned). See local-paths.ts.
   app.get("/api/local-file", async (c) => {
-    const requested = c.req.query("path");
-    if (requested === undefined) throw new ValidationError("path is required");
+    const { path: requested } = parseQuery(c, localFileQuerySchema);
     const { abs, stat } = await resolveAllowedPath(brain, requested);
     if (!stat.isFile()) throw new NotFoundError(`file ${requested}`);
     return fileResponse(c, abs, stat.size);
   });
 
   app.post("/api/open", async (c) => {
-    const { path: requested } = await parseBody(c, pathInput);
+    const { path: requested } = await parseBody(c, pathInputSchema);
     const { abs, stat } = await resolveAllowedPath(brain, requested);
     if (stat.isFile() && !isOpenable(abs)) {
       throw new ForbiddenError(`${path.win32.basename(abs)} is not a type that can be opened; reveal it instead`);
@@ -336,7 +275,7 @@ export function createApi(brain: Brain, opts: ApiOptions): Hono {
   });
 
   app.post("/api/reveal", async (c) => {
-    const { path: requested } = await parseBody(c, pathInput);
+    const { path: requested } = await parseBody(c, pathInputSchema);
     const { abs, stat } = await resolveAllowedPath(brain, requested);
     await launcher.reveal(abs, stat.isDirectory());
     return c.json({ revealed: abs });

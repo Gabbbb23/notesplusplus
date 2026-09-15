@@ -1,15 +1,21 @@
 /**
- * Typed HTTP client over the REST contract in docs/rest-api.md.
+ * Typed HTTP client over the REST contract (src/core/contract, described in docs/rest-api.md).
  * The MCP server is the only consumer. Every request carries X-Brain-Tool: mcp
  * so the git commit message names the MCP server as the author.
+ *
+ * Responses are typed with the contract's inferred types and not parsed: test/api.test.ts checks that every endpoint's
+ * JSON fits its schema.
  */
 import { config } from "../config.ts";
+import { searchQueryParams } from "../core/contract/index.ts";
 import type {
+  BrainStats,
   InboxItem,
+  InboxTakeOptions,
   InboxTakeResult,
   LinkReport,
-  ListFilter,
   Note,
+  NoteListOptions,
   NotePage,
   NoteSummary,
   RenameResult,
@@ -29,12 +35,6 @@ export interface BrainClientOptions {
   fetch?: FetchLike;
 }
 
-export interface BrainStats {
-  notes: number;
-  files: number;
-  invalid: number;
-}
-
 export class BrainClient {
   readonly baseUrl: string;
   private readonly fetchImpl: FetchLike;
@@ -45,10 +45,9 @@ export class BrainClient {
   }
 
   /** One page of notes. Omitted limit and offset take the server defaults. */
-  list(filter: ListFilter & { limit?: number; offset?: number } = {}): Promise<NotePage> {
-    return this.request("GET", "/api/notes", {
-      query: { tag: filter.tag, type: filter.type, limit: filter.limit, offset: filter.offset },
-    });
+  list(opts: NoteListOptions = {}): Promise<NotePage> {
+    // Each option is a query parameter of the same name.
+    return this.request("GET", "/api/notes", { query: opts });
   }
 
   get(slug: string): Promise<Note> {
@@ -77,16 +76,7 @@ export class BrainClient {
   }
 
   search(query: string, opts: SearchOptions = {}): Promise<SearchPage> {
-    return this.request("GET", "/api/search", {
-      query: {
-        q: query,
-        limit: opts.limit,
-        tag: opts.tag,
-        type: opts.type,
-        mode: opts.mode,
-        files: opts.includeFiles,
-      },
-    });
+    return this.request("GET", "/api/search", { query: searchQueryParams(query, opts) });
   }
 
   tags(): Promise<TagWithCount[]> {
@@ -101,7 +91,7 @@ export class BrainClient {
     return this.request("GET", "/api/inbox");
   }
 
-  inboxTake(name: string, opts: { title?: string; slug?: string; summary?: string } = {}): Promise<InboxTakeResult> {
+  inboxTake(name: string, opts: InboxTakeOptions = {}): Promise<InboxTakeResult> {
     return this.request("POST", "/api/inbox/take", { body: { name, ...opts } });
   }
 

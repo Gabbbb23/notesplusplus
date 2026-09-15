@@ -1,7 +1,8 @@
+import { SLUG_RE } from "../contract/index.ts";
 import { ValidationError } from "../types.ts";
 
-/** Lowercase, a-z0-9, hyphen-separated, no leading/trailing/double hyphens. */
-export const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+/** The slug pattern is a contract rule; the store checks slugs against the same one. */
+export { SLUG_RE };
 
 /** Unicode combining marks (U+0300 to U+036F), left behind by NFKD decomposition of accented letters. */
 const COMBINING_MARKS_RE = new RegExp("[\\u0300-\\u036f]", "g");

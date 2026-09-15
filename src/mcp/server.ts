@@ -7,8 +7,23 @@ import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { SUMMARY_MAX_CHARS } from "../core/store/frontmatter.ts";
-import { NOTE_LIST_LIMIT, SEARCH_LIMIT, type LinkReport, type NotePage, type NoteSummary, type SearchResult } from "../core/types.ts";
+import {
+  NOTE_LIST_LIMIT,
+  SEARCH_LIMIT,
+  SUMMARY_MAX_CHARS,
+  createTagInputSchema,
+  frontmatterInputSchema,
+  inboxTakeInputSchema,
+  noteListLimitSchema,
+  noteListOptionsSchema,
+  renameInputSchema,
+  requiredText,
+  searchLimitSchema,
+  searchOptionsSchema,
+  searchPageSchema,
+  writeNoteInputSchema,
+} from "../core/contract/index.ts";
+import type { LinkReport, NotePage, NoteSummary, SearchResult } from "../core/types.ts";
 import type { BrainClient } from "./client.ts";
 
 export interface McpServerOptions {
@@ -16,24 +31,20 @@ export interface McpServerOptions {
   conventionsDir: string;
 }
 
-/** Smaller than the REST defaults: every line lands in an agent's context. */
-const SEARCH_DEFAULT_LIMIT = 10;
-const LIST_NOTES_DEFAULT_LIMIT = 50;
+/**
+ * Smaller than the REST defaults: every line lands in an agent's context. Parsed with the contract's ranges, so a
+ * default the server would refuse fails as soon as this module loads.
+ */
+const SEARCH_DEFAULT_LIMIT = searchLimitSchema.parse(10);
+const LIST_NOTES_DEFAULT_LIMIT = noteListLimitSchema.parse(50);
 
-const noteType = z.enum(["note", "hub", "source"]);
-const searchMode = z.enum(["hybrid", "keyword", "semantic"]);
-
-const searchResultSchema = z.object({
-  kind: z.enum(["note", "file"]),
-  id: z.string(),
-  path: z.string(),
-  title: z.string(),
-  summary: z.string(),
-  snippet: z.string(),
-  score: z.number(),
-  tags: z.array(z.string()),
-  type: noteType.optional(),
-});
+// Tool inputs reuse the contract's field schemas, so their ranges, patterns, and enums are the ones REST parses with.
+// Only descriptions, and defaults inside the contract's ranges, belong to MCP.
+const { limit: _brainLimit, ...searchFilters } = searchOptionsSchema.shape;
+const listNotesInput = noteListOptionsSchema.shape;
+const writeInput = writeNoteInputSchema.shape;
+const frontmatterInput = frontmatterInputSchema.shape;
+const inboxTakeInput = inboxTakeInputSchema.shape;
 
 export function createMcpServer(client: BrainClient, opts: McpServerOptions): McpServer {
   const server = new McpServer({ name: "brain", version: "0.1.0" });
@@ -48,23 +59,16 @@ export function createMcpServer(client: BrainClient, opts: McpServerOptions): Mc
       description:
         `Find notes and files by meaning or keyword. Use this first whenever you need a fact or want to know whether a note already exists. Returns the best ${SEARCH_DEFAULT_LIMIT} hits by default, each with slug, title, summary, and a snippet; open the few that matter with get_note. When more hits exist, the last line says so; raise limit (max ${SEARCH_LIMIT.max}) or refine the query.`,
       inputSchema: {
-        query: z.string().describe("What to look for. Specific terms work best."),
-        limit: z
-          .number()
-          .int()
-          .min(1)
-          .max(SEARCH_LIMIT.max)
-          .optional()
-          .describe(`Max results, 1 to ${SEARCH_LIMIT.max}. Default ${SEARCH_DEFAULT_LIMIT}.`),
-        tag: z.string().optional().describe("Only notes carrying this tag."),
-        type: noteType.optional().describe("Only notes of this type."),
-        mode: searchMode.optional().describe("hybrid (default), keyword (FTS only), or semantic (embeddings only)."),
+        query: requiredText("query").describe("What to look for. Specific terms work best."),
+        limit: searchLimitSchema.optional().describe(`Max results, 1 to ${SEARCH_LIMIT.max}. Default ${SEARCH_DEFAULT_LIMIT}.`),
+        // Every other search option (tag, type, mode, includeFiles), as the contract defines and describes it.
+        ...searchFilters,
       },
-      outputSchema: { results: z.array(searchResultSchema), hasMore: z.boolean() },
+      outputSchema: searchPageSchema.shape,
       annotations: { readOnlyHint: true },
     },
-    guard(async ({ query, limit, tag, type, mode }) => {
-      const { results, hasMore } = await client.search(query, { limit: limit ?? SEARCH_DEFAULT_LIMIT, tag, type, mode });
+    guard(async ({ query, limit, ...filters }) => {
+      const { results, hasMore } = await client.search(query, { ...filters, limit: limit ?? SEARCH_DEFAULT_LIMIT });
       const lines = results.map(formatSearchResult);
       if (hasMore) lines.push(`More results exist; raise limit (max ${SEARCH_LIMIT.max}) or refine the query.`);
       return {
@@ -96,21 +100,13 @@ export function createMcpServer(client: BrainClient, opts: McpServerOptions): Mc
       description:
         `List notes with slug, title, and summary, sorted by title, optionally filtered by tag or type. Returns ${LIST_NOTES_DEFAULT_LIMIT} notes per page by default; when more remain, the last line gives the offset for the next page. Use it to see a whole domain or all hubs; use search when you are looking for a specific fact.`,
       inputSchema: {
-        tag: z.string().optional().describe("Only notes carrying this tag."),
-        type: noteType.optional().describe("Only notes of this type."),
-        limit: z
-          .number()
-          .int()
-          .min(1)
-          .max(NOTE_LIST_LIMIT.max)
-          .optional()
-          .describe(`Notes per page, 1 to ${NOTE_LIST_LIMIT.max}. Default ${LIST_NOTES_DEFAULT_LIMIT}.`),
-        offset: z.number().int().min(0).optional().describe("How many notes to skip, for the next page. Default 0."),
+        ...listNotesInput,
+        limit: listNotesInput.limit.describe(`Notes per page, 1 to ${NOTE_LIST_LIMIT.max}. Default ${LIST_NOTES_DEFAULT_LIMIT}.`),
       },
       annotations: { readOnlyHint: true },
     },
-    guard(async ({ tag, type, limit, offset }) => {
-      const page = await client.list({ tag, type, limit: limit ?? LIST_NOTES_DEFAULT_LIMIT, offset });
+    guard(async ({ limit, ...rest }) => {
+      const page = await client.list({ ...rest, limit: limit ?? LIST_NOTES_DEFAULT_LIMIT });
       return text(formatNotePage(page));
     }),
   );
@@ -137,23 +133,17 @@ export function createMcpServer(client: BrainClient, opts: McpServerOptions): Mc
       description:
         "Write a whole note: frontmatter fields plus the markdown body. Omit slug to create one derived from the title; give a slug to create or replace that file. Tags must already exist (see list_tags). Every write is a git commit. Search before creating to avoid duplicates.",
       inputSchema: {
-        slug: z
-          .string()
-          .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/)
-          .optional()
-          .describe("Target slug. Omit to derive from title."),
-        title: z.string().describe("A claim or a noun phrase."),
-        type: noteType.describe("note, hub, or source."),
-        summary: z
-          .string()
-          .describe(
-            `One sentence containing the fact, for an agent deciding whether to open the note. At most ${SUMMARY_MAX_CHARS} characters.`,
-          ),
-        tags: z.array(z.string()).describe("Tags from list_tags. Usually one, sometimes two."),
-        body: z.string().describe("Markdown body without the frontmatter block. Lead with the fact; end with a ## Related section of wikilinks."),
-        sources: z.array(z.string()).optional().describe("Slugs of source notes this was derived from."),
-        files: z.array(z.string()).optional().describe("Brain-relative attachment paths, e.g. files/invoice.pdf."),
-        expectedMtimeMs: z.number().optional().describe("mtimeMs from get_note. The write fails if the file changed since."),
+        slug: writeInput.slug.describe("Target slug. Omit to derive from title."),
+        title: frontmatterInput.title.describe("A claim or a noun phrase."),
+        type: frontmatterInput.type.describe("note, hub, or source."),
+        summary: frontmatterInput.summary.describe(
+          `One sentence containing the fact, for an agent deciding whether to open the note. At most ${SUMMARY_MAX_CHARS} characters.`,
+        ),
+        tags: frontmatterInput.tags.describe("Tags from list_tags. Usually one, sometimes two."),
+        body: writeInput.body.describe("Markdown body without the frontmatter block. Lead with the fact; end with a ## Related section of wikilinks."),
+        sources: frontmatterInput.sources.describe("Slugs of source notes this was derived from."),
+        files: frontmatterInput.files.describe("Brain-relative attachment paths, e.g. files/invoice.pdf."),
+        expectedMtimeMs: writeInput.expectedMtimeMs.describe("mtimeMs from get_note. The write fails if the file changed since."),
       },
       annotations: { destructiveHint: true },
     },
@@ -175,10 +165,7 @@ export function createMcpServer(client: BrainClient, opts: McpServerOptions): Mc
       description: "Move a note to a new slug and rewrite every [[wikilink]] and sources entry that pointed at the old one. One commit.",
       inputSchema: {
         oldSlug: z.string().describe("Current slug."),
-        newSlug: z
-          .string()
-          .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/)
-          .describe("New slug: lowercase a-z0-9, hyphen-separated."),
+        newSlug: renameInputSchema.shape.newSlug.describe("New slug: lowercase a-z0-9, hyphen-separated."),
       },
       annotations: { destructiveHint: true },
     },
@@ -222,8 +209,8 @@ export function createMcpServer(client: BrainClient, opts: McpServerOptions): Mc
       title: "Create a tag",
       description: "Add a tag to the registry. Tags are few and broad (a whole domain, not a topic). Create one only when list_tags has nothing that fits.",
       inputSchema: {
-        name: z.string().describe("Lowercase, short, hyphenated if needed."),
-        description: z.string().describe("One line saying what belongs under this tag."),
+        name: createTagInputSchema.shape.name.describe("Lowercase, short, hyphenated if needed."),
+        description: createTagInputSchema.shape.description.describe("One line saying what belongs under this tag."),
       },
     },
     guard(async ({ name, description }) => {
@@ -256,17 +243,10 @@ export function createMcpServer(client: BrainClient, opts: McpServerOptions): Mc
       description:
         "Move an inbox item out of the inbox. A text item becomes a source note in sources/ with its contents verbatim; give it a real title and a one-line summary. A binary item moves to files/. Returns the source slug and full contents so you can read it at once.",
       inputSchema: {
-        name: z.string().describe("The item name from inbox_list."),
-        title: z.string().optional().describe("Title for the source note. Default: the filename."),
-        slug: z
-          .string()
-          .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/)
-          .optional()
-          .describe("Slug for the source note. Default: derived from the title."),
-        summary: z
-          .string()
-          .optional()
-          .describe(`One line: what the material is and where it came from. At most ${SUMMARY_MAX_CHARS} characters.`),
+        name: inboxTakeInput.name.describe("The item name from inbox_list."),
+        title: inboxTakeInput.title.describe("Title for the source note. Default: the filename."),
+        slug: inboxTakeInput.slug.describe("Slug for the source note. Default: derived from the title."),
+        summary: inboxTakeInput.summary.describe(`One line: what the material is and where it came from. At most ${SUMMARY_MAX_CHARS} characters.`),
       },
       annotations: { destructiveHint: true },
     },

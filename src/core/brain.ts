@@ -1,7 +1,9 @@
 import type {
   Brain,
+  BrainStats,
   FileEntry,
   InboxItem,
+  InboxTakeOptions,
   InboxTakeResult,
   IndexStats,
   LinkReport,
@@ -120,7 +122,7 @@ export class BrainImpl implements Brain {
 
   async inboxTake(
     name: string,
-    opts: { title?: string; slug?: string; summary?: string },
+    opts: InboxTakeOptions,
     meta: WriteMeta,
   ): Promise<InboxTakeResult> {
     const result = await this.store.inboxTake(name, opts, meta);
@@ -150,7 +152,7 @@ export class BrainImpl implements Brain {
     return { ...fromFiles, ...membership };
   }
 
-  stats(): Promise<Omit<IndexStats, "durationMs">> {
+  stats(): Promise<BrainStats> {
     return this.index.stats();
   }
 

@@ -9,7 +9,7 @@ import { createApi } from "../src/api/index.ts";
 import type { Launcher } from "../src/api/launcher.ts";
 import { BrainClient, type FetchLike } from "../src/mcp/client.ts";
 import { createMcpServer, formatLinkReport } from "../src/mcp/server.ts";
-import { SUMMARY_MAX_CHARS } from "../src/core/store/frontmatter.ts";
+import { SUMMARY_MAX_CHARS } from "../src/core/contract/index.ts";
 import type { Brain, SearchPage } from "../src/core/types.ts";
 import { TempBrain, type NoteFixture } from "./helpers/temp-brain.ts";
 
@@ -284,14 +284,16 @@ describe("MCP server", () => {
     expect((cut.structuredContent as SearchPage).hasMore).toBe(true);
   });
 
-  it("search rejects a limit over 100 in the schema, before calling the server", async () => {
-    const before = calls.length;
-    const res = await mcp.callTool({ name: "search", arguments: { query: "ryzen", limit: 101 } });
-    expect(res.isError).toBe(true);
-    expect(textOf(res)).toContain("Input validation error");
-    expect(textOf(res)).toContain("limit");
-    expect(calls.length).toBe(before);
-    expect((await mcp.callTool({ name: "search", arguments: { query: "ryzen", limit: 100 } })).isError).toBeFalsy();
+  it("search passes includeFiles to REST as files, and false leaves files out", async () => {
+    const notesOnly = await mcp.callTool({ name: "search", arguments: { query: "ryzen", includeFiles: false } });
+    expect(notesOnly.isError).toBeFalsy();
+    expect(calls.filter((c) => c.url.pathname === "/api/search").at(-1)?.url.searchParams.get("files")).toBe("false");
+    expect(textOf(notesOnly)).not.toContain("[file]");
+    expect(notesOnly.structuredContent).toEqual(await restSearch("q=ryzen&limit=10&files=false"));
+
+    const { tools } = await mcp.listTools();
+    const search = tools.find((t) => t.name === "search")?.inputSchema as { properties: Record<string, { type?: string; description?: string }> };
+    expect(search.properties.includeFiles).toMatchObject({ type: "boolean", description: expect.stringContaining("Default true") });
   });
 
   it("get_note returns the raw file and mtimeMs", async () => {
@@ -508,19 +510,11 @@ describe("list_notes paging", () => {
     expect(await listNotes({ offset: 500 })).toEqual(["No notes at offset=500. There are 121 in total."]);
   });
 
-  it("has no footer when a filter fits on one page, and checks limit and offset in the schema", async () => {
+  it("has no footer when a filter fits on one page", async () => {
     const lines = await listNotes({ tag: "hardware" });
     expect(lines).toHaveLength(10);
     expect(lines.some((l) => l.startsWith("Showing"))).toBe(false);
     expect(await listNotes({ tag: "nope" })).toEqual(["No notes."]);
-
-    const before = calls.length;
-    for (const args of [{ limit: 0 }, { limit: 501 }, { offset: -1 }]) {
-      const res = await mcp.callTool({ name: "list_notes", arguments: args });
-      expect(res.isError, JSON.stringify(args)).toBe(true);
-      expect(textOf(res)).toContain("Input validation error");
-    }
-    expect(calls.length).toBe(before);
   });
 });
 

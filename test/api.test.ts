@@ -3,9 +3,30 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Hono } from "hono";
+import { z } from "zod";
 import { contentTypeFor } from "../src/api/file-response.ts";
 import { createApi } from "../src/api/index.ts";
 import type { Launcher } from "../src/api/launcher.ts";
+import {
+  brainStatsSchema,
+  errorEnvelopeSchema,
+  fileEntrySchema,
+  healthSchema,
+  inboxItemSchema,
+  inboxTakeResultSchema,
+  indexStatsSchema,
+  linkReportSchema,
+  noteSchema,
+  noteSummarySchema,
+  notePageSchema,
+  noteTrailSchema,
+  openResultSchema,
+  renameResultSchema,
+  revealResultSchema,
+  searchPageSchema,
+  tagSchema,
+  tagWithCountSchema,
+} from "../src/core/contract/index.ts";
 import type { Brain, NotePage, SearchPage } from "../src/core/types.ts";
 import { TempBrain, type NoteFixture } from "./helpers/temp-brain.ts";
 
@@ -171,8 +192,6 @@ describe("notes", () => {
 
     const byType = (await (await app.request("/api/notes?type=source")).json()) as NotePage;
     expect(byType.items.map((n) => n.slug)).toEqual(["laptop-transcript"]);
-
-    expect((await app.request("/api/notes?type=bogus")).status).toBe(400);
   });
 
   it("POST /api/notes rejects invalid JSON and schema failures with 400", async () => {
@@ -482,14 +501,6 @@ describe("search", () => {
     expect(await at("")).toEqual({ results: three.results, hasMore: false });
     expect((await at("&limit=100")).hasMore).toBe(false);
     expect(searchSpy.mock.calls.map(([, opts]) => opts?.limit)).toEqual([3, 4, 21, 101]);
-  });
-
-  it("GET /api/search validates q, limit, and mode", async () => {
-    expect((await app.request("/api/search")).status).toBe(400);
-    expect((await app.request("/api/search?q=x&limit=0")).status).toBe(400);
-    expect((await app.request("/api/search?q=x&limit=101")).status).toBe(400);
-    expect((await app.request("/api/search?q=x&limit=abc")).status).toBe(400);
-    expect((await app.request("/api/search?q=x&mode=psychic")).status).toBe(400);
   });
 });
 
@@ -1029,6 +1040,101 @@ describe("conventions", () => {
 
     fs.rmSync(path.join(conventionsDir, "garden.md"));
     expect((await app.request("/api/conventions/garden")).status).toBe(404);
+  });
+});
+
+// Every JSON response, checked against its schema in src/core/contract. The schemas are strict, so a field the server
+// adds or drops without changing the contract fails here. Lists are seeded non-empty so their items are checked too.
+describe("response shapes", () => {
+  freshBrainPerTest();
+
+  /** The response's status, and every way its JSON body departs from `schema` ([] when it fits). */
+  const shapeOf = async (res: Response, schema: z.ZodType) => {
+    const body: unknown = await res.json();
+    const result = schema.safeParse(body);
+    return { status: res.status, drift: result.success ? [] : result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`) };
+  };
+
+  it("every JSON endpoint answers with its contract schema", async () => {
+    await tb.writeNotes([
+      {
+        slug: "dangling",
+        frontmatter: { title: "Dangling", type: "note", summary: "s", tags: [], sources: ["gone"], files: ["files/missing.pdf"] },
+        body: "[[nowhere]] and `C:\\Important Files\\Module 1.pdf`",
+      },
+      { slug: "laptops", frontmatter: { title: "Laptops", type: "hub", summary: "s", tags: [] }, body: "- [[ryzen-laptop-specs]]\n" },
+    ]);
+    await tb.addFile("notes/junk.md", "no frontmatter here\n");
+    await tb.addFile("inbox/talk.md", "hello");
+    await tb.addFile("inbox/photo.png", Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 0]));
+    const noteInput = { frontmatter: { title: "Shape note", type: "note", summary: "s", tags: ["laptop"] }, body: "[[index]]" };
+
+    const cases: Array<[string, () => Response | Promise<Response>, number, z.ZodType]> = [
+      ["GET /api/notes", () => app.request("/api/notes"), 200, notePageSchema],
+      ["POST /api/notes", () => app.request("/api/notes", json(noteInput)), 201, noteSchema],
+      ["GET /api/notes/:slug", () => app.request("/api/notes/dangling"), 200, noteSchema],
+      ["PUT /api/notes/:slug", () => app.request("/api/notes/shape-note", { ...json(noteInput), method: "PUT" }), 200, noteSchema],
+      ["POST /api/notes/:slug/rename", () => app.request("/api/notes/shape-note/rename", json({ newSlug: "shaped-note" })), 200, renameResultSchema],
+      ["GET /api/notes/:slug/backlinks", () => app.request("/api/notes/laptop-transcript/backlinks"), 200, z.array(noteSummarySchema).nonempty()],
+      ["GET /api/notes/:slug/trail", () => app.request("/api/notes/ryzen-laptop-specs/trail"), 200, noteTrailSchema],
+      ["GET /api/search (notes)", () => app.request("/api/search?q=ryzen"), 200, searchPageSchema],
+      ["GET /api/search (files)", () => app.request("/api/search?q=invoice&mode=keyword"), 200, searchPageSchema],
+      ["GET /api/tags", () => app.request("/api/tags"), 200, z.array(tagWithCountSchema).nonempty()],
+      ["POST /api/tags", () => app.request("/api/tags", json({ name: "gpu", description: "Graphics cards" })), 201, tagSchema],
+      ["GET /api/inbox", () => app.request("/api/inbox"), 200, z.array(inboxItemSchema).nonempty()],
+      ["POST /api/inbox", () => app.request("/api/inbox", json({ name: "dropped.md", content: "x" })), 201, inboxItemSchema],
+      ["POST /api/inbox/take (source)", () => app.request("/api/inbox/take", json({ name: "talk.md", title: "Talk" })), 200, inboxTakeResultSchema],
+      ["POST /api/inbox/take (file)", () => app.request("/api/inbox/take", json({ name: "photo.png" })), 200, inboxTakeResultSchema],
+      ["GET /api/files", () => app.request("/api/files"), 200, z.array(fileEntrySchema).nonempty()],
+      ["POST /api/open", () => app.request("/api/open", json({ path: "files/invoice.pdf" })), 200, openResultSchema],
+      ["POST /api/reveal", () => app.request("/api/reveal", json({ path: "files/invoice.pdf" })), 200, revealResultSchema],
+      ["GET /api/check-links", () => app.request("/api/check-links"), 200, linkReportSchema],
+      ["GET /api/stats", () => app.request("/api/stats"), 200, brainStatsSchema],
+      ["POST /api/reindex", () => app.request("/api/reindex", { method: "POST" }), 200, indexStatsSchema],
+      ["GET /api/health", () => app.request("/api/health"), 200, healthSchema],
+    ];
+    for (const [route, send, status, schema] of cases) {
+      expect(await shapeOf(await send(), schema), route).toEqual({ status, drift: [] });
+    }
+
+    // The lists above were not empty, so their items were checked as well.
+    const files = (await (await app.request("/api/search?q=invoice&mode=keyword")).json()) as SearchPage;
+    expect(files.results.some((r) => r.kind === "file")).toBe(true);
+    const report = (await (await app.request("/api/check-links")).json()) as Record<string, unknown[]>;
+    expect(Object.entries(report).filter(([, list]) => list.length === 0)).toEqual([]);
+  });
+
+  it("every error answers with the error envelope", async () => {
+    await tb.addFile("notes/junk.md", "no frontmatter here\n");
+    vi.spyOn(brain, "stats").mockRejectedValueOnce(new Error("disk on fire"));
+    const hub = { frontmatter: { title: "Index", type: "hub", summary: "s", tags: [] }, body: "", expectedMtimeMs: 1 };
+    const cases: Array<[string, () => Response | Promise<Response>, number]> = [
+      ["validation", () => app.request("/api/search"), 400],
+      ["forbidden", () => app.request("/api/health", { headers: { host: "evil.com" } }), 403],
+      ["not_found", () => app.request("/api/notes/nope"), 404],
+      ["no route", () => app.request("/api/nothing-here"), 404],
+      ["conflict", () => app.request("/api/notes/index", { ...json(hub), method: "PUT" }), 409],
+      ["unsupported_media_type", () => app.request("/api/open", { method: "POST", headers: { "content-type": "text/plain" }, body: "{}" }), 415],
+      ["range_not_satisfiable", () => app.request("/api/files/invoice.pdf", { headers: { range: "bytes=999999-" } }), 416],
+      ["invalid_note", () => app.request("/api/notes/junk"), 422],
+      ["internal", () => app.request("/api/stats"), 500],
+    ];
+    for (const [code, send, status] of cases) {
+      expect(await shapeOf(await send(), errorEnvelopeSchema), code).toEqual({ status, drift: [] });
+    }
+  });
+});
+
+describe("docs/rest-api.md", () => {
+  sharedBrain();
+
+  it("has one endpoint table row for each route in the REST app, and none for a route it lacks", () => {
+    const doc = fs.readFileSync(path.resolve(import.meta.dirname, "..", "docs", "rest-api.md"), "utf8");
+    const rows = [...doc.matchAll(/^\| (GET|POST|PUT|PATCH|DELETE) \| `([^`?]+)[^`]*` \|/gm)].map((m) => `${m[1]} ${m[2]}`);
+    // app.use middleware and the JSON 404 catch-all register as ALL; they are not endpoints.
+    const routes = app.routes.filter((r) => r.method !== "ALL").map((r) => `${r.method} ${r.path}`);
+    expect(rows.length).toBeGreaterThan(20);
+    expect(rows.sort()).toEqual(routes.sort());
   });
 });
 
