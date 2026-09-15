@@ -1,20 +1,41 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Hono } from "hono";
 import { contentTypeFor } from "../src/api/file-response.ts";
 import { createApi } from "../src/api/index.ts";
 import type { Launcher } from "../src/api/launcher.ts";
-import type { NotePage, SearchPage } from "../src/core/types.ts";
-import { seededBrain, type FakeBrain } from "./helpers/fake-brain.ts";
+import type { Brain, NotePage, SearchPage } from "../src/core/types.ts";
+import { TempBrain, type NoteFixture } from "./helpers/temp-brain.ts";
 
-let root: string;
+// The REST app runs on a real brain: file store, git repo, and SQLite index (embeddings off) in temp folders.
+
+const meta = { tool: "test" };
+
+/**
+ * Built once through the real brain; every group works on a copy.
+ *   tags: hardware, laptop
+ *   index (hub) -> links [[ryzen-laptop-specs]]
+ *   ryzen-laptop-specs (note) -> links [[laptop-transcript]], [[index]], sources [laptop-transcript], files [files/invoice.pdf]
+ *   laptop-transcript (source)
+ *   files/invoice.pdf
+ */
+let seeded: TempBrain;
 let conventionsDir: string;
-let brain: FakeBrain;
+
+/** The brain the current test runs against, its repo root, and the REST app over it. */
+let tb: TempBrain;
+let brain: Brain;
+let root: string;
 let app: Hono;
 /** What the fake launcher was asked to do. No test starts a real program. */
 let launched: Array<{ action: "open" | "reveal"; path: string; isDirectory?: boolean }>;
+
+const launcher: Launcher = {
+  open: async (p) => void launched.push({ action: "open", path: p }),
+  reveal: async (p, isDirectory) => void launched.push({ action: "reveal", path: p, isDirectory }),
+};
 
 const json = (body: unknown, headers: Record<string, string> = {}) => ({
   method: "POST",
@@ -22,29 +43,122 @@ const json = (body: unknown, headers: Record<string, string> = {}) => ({
   body: JSON.stringify(body),
 });
 
-beforeEach(() => {
-  root = fs.mkdtempSync(path.join(os.tmpdir(), "npp-api-"));
-  conventionsDir = path.join(root, "conventions");
-  fs.mkdirSync(conventionsDir);
+const errorCode = async (res: Response) => ((await res.json()) as { error: { code: string } }).error.code;
+
+/**
+ * A one-page PDF showing `text`, with a correct xref table. The index extracts real PDFs, and a malformed one makes
+ * pdf.js print a warning on every reindex.
+ */
+function minimalPdf(text: string): string {
+  const content = `BT /F1 12 Tf 20 100 Td (${text}) Tj ET`;
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ];
+  let pdf = "%PDF-1.4\n";
+  const offsets = objects.map((body, i) => {
+    const at = pdf.length;
+    pdf += `${i + 1} 0 obj\n${body}\nendobj\n`;
+    return at;
+  });
+  const xref = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.map((o) => `${String(o).padStart(10, "0")} 00000 n \n`).join("")}`;
+  return `${pdf}trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+}
+
+const INVOICE_PDF = minimalPdf("Invoice total 62000 PHP");
+
+function writeConventions(): void {
   fs.writeFileSync(path.join(conventionsDir, "conventions.md"), "# Conventions\n\nstub\n");
   fs.writeFileSync(path.join(conventionsDir, "file.md"), "# File skill\n");
   fs.writeFileSync(path.join(conventionsDir, "garden.md"), "# Garden skill\n");
-  brain = seededBrain(root);
-  launched = [];
-  const launcher: Launcher = {
-    open: async (p) => void launched.push({ action: "open", path: p }),
-    reveal: async (p, isDirectory) => void launched.push({ action: "reveal", path: p, isDirectory }),
-  };
-  app = createApi(brain, { conventionsDir, launcher });
+}
+
+beforeAll(async () => {
+  conventionsDir = fs.mkdtempSync(path.join(os.tmpdir(), "npp-conventions-"));
+  writeConventions();
+
+  seeded = await TempBrain.create();
+  const b = seeded.brain;
+  await b.createTag({ name: "hardware", description: "Physical machines and parts" }, meta);
+  await b.createTag({ name: "laptop", description: "Portable computers" }, meta);
+  await b.write(
+    {
+      slug: "index",
+      frontmatter: { title: "Index", type: "hub", summary: "Root hub of the brain.", tags: [] },
+      body: "# Hubs\n\n- [[ryzen-laptop-specs|Laptop specs]]\n",
+    },
+    meta,
+  );
+  await b.write(
+    {
+      slug: "ryzen-laptop-specs",
+      frontmatter: {
+        title: "Ryzen laptop specs",
+        type: "note",
+        summary: "The laptop has a Ryzen 7 7735HS and an RTX 4050.",
+        tags: ["hardware", "laptop"],
+        sources: ["laptop-transcript"],
+        files: ["files/invoice.pdf"],
+      },
+      body: "The CPU is a **Ryzen 7 7735HS**. See [[laptop-transcript]] and [[index|home]].\n\n`[[not-a-link]]` stays code.\n",
+    },
+    meta,
+  );
+  await b.write(
+    {
+      slug: "laptop-transcript",
+      frontmatter: { title: "Laptop transcript", type: "source", summary: "Raw transcript about the laptop.", tags: ["laptop"] },
+      body: "Speaker 1: the laptop has 16 GB RAM <b>bold</b> and a Ryzen chip.\n",
+    },
+    meta,
+  );
+  await seeded.addFile("files/invoice.pdf", INVOICE_PDF);
 });
 
-const errorCode = async (res: Response) => ((await res.json()) as { error: { code: string } }).error.code;
+afterAll(async () => {
+  await seeded.dispose();
+  fs.rmSync(conventionsDir, { recursive: true, force: true });
+});
+
+beforeEach(() => {
+  launched = [];
+});
 
 afterEach(() => {
-  fs.rmSync(root, { recursive: true, force: true });
+  vi.restoreAllMocks();
 });
 
+function use(t: TempBrain): void {
+  tb = t;
+  brain = t.brain;
+  root = t.root;
+  app = createApi(brain, { conventionsDir, launcher });
+}
+
+/** Every test in the enclosing describe gets its own copy of the seeded brain. For groups whose tests change it. */
+function freshBrainPerTest(): void {
+  beforeEach(async () => use(await seeded.copy()));
+  afterEach(async () => tb.dispose());
+}
+
+/** One copy of the seeded brain for the whole describe, after `setup`. For groups whose tests do not disturb each other. */
+function sharedBrain(setup?: (t: TempBrain) => Promise<void>): void {
+  let shared: TempBrain;
+  beforeAll(async () => {
+    shared = await seeded.copy();
+    await setup?.(shared);
+  });
+  beforeEach(() => use(shared));
+  afterAll(async () => shared.dispose());
+}
+
 describe("notes", () => {
+  sharedBrain();
+
   it("GET /api/notes lists summaries and filters by tag and type", async () => {
     const res = await app.request("/api/notes");
     expect(res.status).toBe(200);
@@ -59,18 +173,6 @@ describe("notes", () => {
     expect(byType.items.map((n) => n.slug)).toEqual(["laptop-transcript"]);
 
     expect((await app.request("/api/notes?type=bogus")).status).toBe(400);
-  });
-
-  it("POST /api/notes creates with a derived slug and returns 201", async () => {
-    const res = await app.request(
-      "/api/notes",
-      json({ frontmatter: { title: "New Note Here", type: "note", summary: "s", tags: ["laptop"] }, body: "hi" }),
-    );
-    expect(res.status).toBe(201);
-    const note = (await res.json()) as { slug: string; path: string; frontmatter: { created: string } };
-    expect(note.slug).toBe("new-note-here");
-    expect(note.path).toBe("notes/new-note-here.md");
-    expect(note.frontmatter.created).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
   it("POST /api/notes rejects invalid JSON and schema failures with 400", async () => {
@@ -91,7 +193,7 @@ describe("notes", () => {
       json({ frontmatter: { title: "T", type: "note", summary: "s", tags: ["nope"] }, body: "" }),
     );
     expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: { code: "validation", message: "unknown tags: nope" } });
+    expect(await res.json()).toEqual({ error: { code: "validation", message: "unknown tags: nope. Create them with createTag first." } });
   });
 
   it("GET /api/notes/:slug returns the note or 404", async () => {
@@ -107,6 +209,28 @@ describe("notes", () => {
     expect(await missing.json()).toEqual({ error: { code: "not_found", message: "note nope not found" } });
   });
 
+  it("GET /api/notes/:slug/backlinks lists linking notes", async () => {
+    const res = await app.request("/api/notes/laptop-transcript/backlinks");
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as Array<{ slug: string }>).map((n) => n.slug)).toEqual(["ryzen-laptop-specs"]);
+  });
+});
+
+describe("note writes", () => {
+  freshBrainPerTest();
+
+  it("POST /api/notes creates with a derived slug and returns 201", async () => {
+    const res = await app.request(
+      "/api/notes",
+      json({ frontmatter: { title: "New Note Here", type: "note", summary: "s", tags: ["laptop"] }, body: "hi" }),
+    );
+    expect(res.status).toBe(201);
+    const note = (await res.json()) as { slug: string; path: string; frontmatter: { created: string } };
+    expect(note.slug).toBe("new-note-here");
+    expect(note.path).toBe("notes/new-note-here.md");
+    expect(note.frontmatter.created).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
   it("PUT /api/notes/:slug replaces and enforces expectedMtimeMs with 409", async () => {
     const put = (expectedMtimeMs?: number) =>
       app.request("/api/notes/ryzen-laptop-specs", {
@@ -117,7 +241,7 @@ describe("notes", () => {
     expect(conflict.status).toBe(409);
     expect(((await conflict.json()) as { error: { code: string } }).error.code).toBe("conflict");
 
-    const current = brain.notes.get("ryzen-laptop-specs")!.mtimeMs;
+    const current = (await brain.get("ryzen-laptop-specs"))!.mtimeMs;
     const ok = await put(current);
     expect(ok.status).toBe(200);
     expect(((await ok.json()) as { body: string }).body).toBe("replaced");
@@ -127,7 +251,7 @@ describe("notes", () => {
       method: "PUT",
     });
     expect(created.status).toBe(200);
-    expect(brain.notes.has("brand-new")).toBe(true);
+    expect(await brain.get("brand-new")).not.toBeNull();
   });
 
   it("DELETE /api/notes/:slug returns 204 and 404 afterwards", async () => {
@@ -136,32 +260,33 @@ describe("notes", () => {
     expect((await app.request("/api/notes/laptop-transcript", { method: "DELETE" })).status).toBe(404);
   });
 
-  it("POST /api/notes/:slug/rename returns RenameResult and rewrites links", async () => {
+  it("POST /api/notes/:slug/rename returns RenameResult, rewrites links, and refuses a taken slug with 400", async () => {
+    const taken = await app.request("/api/notes/laptop-transcript/rename", json({ newSlug: "ryzen-laptop-specs" }));
+    expect(taken.status).toBe(400);
+    expect(await taken.json()).toEqual({ error: { code: "validation", message: "slug ryzen-laptop-specs already exists" } });
+
     const res = await app.request("/api/notes/laptop-transcript/rename", json({ newSlug: "laptop-source" }));
     expect(res.status).toBe(200);
     const body = (await res.json()) as { note: { slug: string }; rewritten: string[] };
     expect(body.note.slug).toBe("laptop-source");
     expect(body.rewritten).toEqual(["ryzen-laptop-specs"]);
-    expect(brain.notes.get("ryzen-laptop-specs")!.body).toContain("[[laptop-source]]");
-  });
-
-  it("GET /api/notes/:slug/backlinks lists linking notes", async () => {
-    const res = await app.request("/api/notes/laptop-transcript/backlinks");
-    expect(res.status).toBe(200);
-    expect(((await res.json()) as Array<{ slug: string }>).map((n) => n.slug)).toEqual(["ryzen-laptop-specs"]);
+    expect((await brain.get("ryzen-laptop-specs"))!.body).toContain("[[laptop-source]]");
   });
 });
 
 describe("notes paging", () => {
   // Twelve notes: the three seeded ones plus nine more. Two share a title, so their slugs decide the order.
   // laptop: laptop-transcript (source), ryzen-laptop-specs, note-1, note-3, note-5, note-7.
-  beforeEach(() => {
-    for (let i = 1; i <= 7; i++) {
-      brain.seed({ slug: `note-${i}`, frontmatter: { title: `Note ${i}`, type: "note", summary: "s", tags: i % 2 ? ["laptop"] : [] }, body: "" });
-    }
-    brain.seed({ slug: "twin-b", frontmatter: { title: "Twin", type: "note", summary: "s", tags: [] }, body: "" });
-    brain.seed({ slug: "twin-a", frontmatter: { title: "Twin", type: "note", summary: "s", tags: [] }, body: "" });
-  });
+  sharedBrain((t) =>
+    t.writeNotes([
+      ...Array.from({ length: 7 }, (_, n): NoteFixture => {
+        const i = n + 1;
+        return { slug: `note-${i}`, frontmatter: { title: `Note ${i}`, type: "note", summary: "s", tags: i % 2 ? ["laptop"] : [] }, body: "" };
+      }),
+      { slug: "twin-b", frontmatter: { title: "Twin", type: "note", summary: "s", tags: [] }, body: "" },
+      { slug: "twin-a", frontmatter: { title: "Twin", type: "note", summary: "s", tags: [] }, body: "" },
+    ]),
+  );
 
   const allSlugs = [
     "index",
@@ -245,23 +370,24 @@ describe("notes paging", () => {
 describe("note trail", () => {
   // index -> college -> ge09-life-and-works-of-rizal -> rizal-day note and a source. ge09 links back to college.
   // laptop-transcript stays linked only from ryzen-laptop-specs, a plain note.
-  beforeEach(() => {
-    const hub = (slug: string, title: string, body: string) =>
-      brain.seed({ slug, frontmatter: { title, type: "hub", summary: "s", tags: [] }, body });
-    hub("index", "Index", "- [[ryzen-laptop-specs]]\n- [[college]]\n- [[gone]]\n");
-    hub("college", "College", "- [[ge09-life-and-works-of-rizal]]\n");
-    hub("ge09-life-and-works-of-rizal", "GE09 Life and Works of Rizal", "- [[rizal-day-is-rizals-death-anniversary]]\n- [[ge09-video-1-transcript]]\n- [[college]] hub\n");
-    brain.seed({
-      slug: "rizal-day-is-rizals-death-anniversary",
-      frontmatter: { title: "Rizal Day is Rizal's death anniversary", type: "note", summary: "s", tags: [] },
-      body: "December 30.",
-    });
-    brain.seed({
-      slug: "ge09-video-1-transcript",
-      frontmatter: { title: "GE09 video 1 transcript", type: "source", summary: "s", tags: [] },
-      body: "Transcript.",
-    });
-  });
+  const hub = (slug: string, title: string, body: string): NoteFixture => ({ slug, frontmatter: { title, type: "hub", summary: "s", tags: [] }, body });
+  sharedBrain((t) =>
+    t.writeNotes([
+      hub("index", "Index", "- [[ryzen-laptop-specs]]\n- [[college]]\n- [[gone]]\n"),
+      hub("college", "College", "- [[ge09-life-and-works-of-rizal]]\n"),
+      hub("ge09-life-and-works-of-rizal", "GE09 Life and Works of Rizal", "- [[rizal-day-is-rizals-death-anniversary]]\n- [[ge09-video-1-transcript]]\n- [[college]] hub\n"),
+      {
+        slug: "rizal-day-is-rizals-death-anniversary",
+        frontmatter: { title: "Rizal Day is Rizal's death anniversary", type: "note", summary: "s", tags: [] },
+        body: "December 30.",
+      },
+      {
+        slug: "ge09-video-1-transcript",
+        frontmatter: { title: "GE09 video 1 transcript", type: "source", summary: "s", tags: [] },
+        body: "Transcript.",
+      },
+    ]),
+  );
 
   const trailOf = async (slug: string) => {
     const res = await app.request(`/api/notes/${slug}/trail`);
@@ -287,8 +413,15 @@ describe("note trail", () => {
 
   it("GET /api/notes/:slug/trail reports a note no hub chain reaches, and every note once index is gone", async () => {
     expect(await trailOf("laptop-transcript")).toEqual({ status: 200, body: { trail: [], inHub: false } });
-    brain.notes.delete("index");
-    expect(await trailOf("rizal-day-is-rizals-death-anniversary")).toEqual({ status: 200, body: { trail: [], inHub: false } });
+    // The store refuses to delete the root hub, but the file can still go missing on disk.
+    const indexFile = path.join(root, "notes", "index.md");
+    const saved = fs.readFileSync(indexFile);
+    fs.rmSync(indexFile);
+    try {
+      expect(await trailOf("rizal-day-is-rizals-death-anniversary")).toEqual({ status: 200, body: { trail: [], inHub: false } });
+    } finally {
+      fs.writeFileSync(indexFile, saved);
+    }
   });
 
   it("GET /api/notes/:slug/trail returns 404 for an unknown slug, including one a hub links to", async () => {
@@ -299,22 +432,29 @@ describe("note trail", () => {
 });
 
 describe("X-Brain-Tool", () => {
-  it("defaults to api and propagates a trimmed, capped header into WriteMeta", async () => {
-    await app.request("/api/notes", json({ frontmatter: { title: "A", type: "note", summary: "s", tags: [] }, body: "" }));
-    expect(brain.writes.at(-1)!.meta).toEqual({ tool: "api" });
+  freshBrainPerTest();
 
-    await app.request("/api/notes", json({ frontmatter: { title: "B", type: "note", summary: "s", tags: [] }, body: "" }, { "X-Brain-Tool": "  claude-code  " }));
-    expect(brain.writes.at(-1)!.meta).toEqual({ tool: "claude-code" });
+  it("defaults to api and puts a trimmed, capped header in the commit message", async () => {
+    const lastCommitAfter = async (res: Response | Promise<Response>) => {
+      expect((await res).ok).toBe(true);
+      return (await tb.commits())[0];
+    };
+    const note = (title: string) => ({ frontmatter: { title, type: "note", summary: "s", tags: [] }, body: "" });
 
-    await app.request("/api/notes/a", { method: "DELETE", headers: { "X-Brain-Tool": "x".repeat(100) } });
-    expect(brain.writes.at(-1)!.meta.tool).toHaveLength(64);
-
-    await app.request("/api/tags", json({ name: "new-tag", description: "d" }, { "X-Brain-Tool": "codex" }));
-    expect(brain.writes.at(-1)).toMatchObject({ action: "createTag", meta: { tool: "codex" } });
+    expect(await lastCommitAfter(app.request("/api/notes", json(note("A"))))).toBe("api: write a");
+    expect(await lastCommitAfter(app.request("/api/notes", json(note("B"), { "X-Brain-Tool": "  claude-code  " })))).toBe("claude-code: write b");
+    expect(await lastCommitAfter(app.request("/api/notes/a", { method: "DELETE", headers: { "X-Brain-Tool": "x".repeat(100) } }))).toBe(
+      `${"x".repeat(64)}: delete a`,
+    );
+    expect(await lastCommitAfter(app.request("/api/tags", json({ name: "new-tag", description: "d" }, { "X-Brain-Tool": "codex" })))).toBe(
+      "codex: create tag new-tag",
+    );
   });
 });
 
 describe("search", () => {
+  sharedBrain();
+
   it("GET /api/search returns results and honours limit, files, tag, type", async () => {
     const search = async (query: string) => ((await (await app.request(`/api/search?${query}`)).json()) as SearchPage).results;
     const res = await app.request("/api/search?q=ryzen");
@@ -361,6 +501,8 @@ describe("search", () => {
 });
 
 describe("tags", () => {
+  freshBrainPerTest();
+
   it("GET /api/tags and POST /api/tags", async () => {
     const list = await app.request("/api/tags");
     expect(list.status).toBe(200);
@@ -375,16 +517,17 @@ describe("tags", () => {
     expect(await (await app.request("/api/tags")).json()).toContainEqual({ name: "gpu", description: "Graphics cards", count: 0 });
 
     const dup = await app.request("/api/tags", json({ name: "gpu", description: "again" }));
-    expect(dup.status).toBe(409);
+    expect(dup.status).toBe(400);
+    expect(await dup.json()).toEqual({ error: { code: "validation", message: "tag gpu already exists" } });
 
     const bad = await app.request("/api/tags", json({ name: "gpu" }));
     expect(bad.status).toBe(400);
   });
 
   it("GET /api/tags counts notes of every type per tag from a single list call", async () => {
-    brain.addTag("unused", "Nothing carries this");
+    await brain.createTag({ name: "unused", description: "Nothing carries this" }, meta);
     // ryzen-laptop-specs (note) carries hardware and laptop, laptop-transcript (source) carries laptop, the hub carries hardware.
-    brain.seed({ slug: "hardware", frontmatter: { title: "Hardware", type: "hub", summary: "s", tags: ["hardware"] }, body: "" });
+    await tb.writeNotes([{ slug: "hardware", frontmatter: { title: "Hardware", type: "hub", summary: "s", tags: ["hardware"] }, body: "" }]);
     const listSpy = vi.spyOn(brain, "list");
     const res = await app.request("/api/tags");
     expect(res.status).toBe(200);
@@ -399,6 +542,8 @@ describe("tags", () => {
 });
 
 describe("inbox", () => {
+  freshBrainPerTest();
+
   it("GET /api/inbox, POST /api/inbox, POST /api/inbox/take", async () => {
     expect(await (await app.request("/api/inbox")).json()).toEqual([]);
 
@@ -415,7 +560,7 @@ describe("inbox", () => {
     const result = (await taken.json()) as { kind: string; note: { slug: string; type: string; body: string } };
     expect(result.kind).toBe("source");
     expect(result.note).toMatchObject({ slug: "a-talk", type: "source", body: "hello world" });
-    expect(brain.writes.at(-1)).toMatchObject({ action: "inboxTake", meta: { tool: "claude" } });
+    expect((await tb.commits())[0]).toBe("claude: take inbox talk.md -> a-talk");
 
     expect((await app.request("/api/inbox/take", json({ name: "talk.md" }))).status).toBe(404);
     expect((await app.request("/api/inbox/take", json({}))).status).toBe(400);
@@ -423,26 +568,29 @@ describe("inbox", () => {
 });
 
 describe("files", () => {
+  sharedBrain();
+
   it("GET /api/files lists entries", async () => {
     const res = await app.request("/api/files");
     expect(res.status).toBe(200);
     const files = (await res.json()) as Array<{ path: string; ext: string; sizeBytes: number }>;
-    expect(files).toHaveLength(1);
-    expect(files[0]).toMatchObject({ path: "files/invoice.pdf", ext: "pdf" });
+    // Other tests in this group add files, so check the seeded one and that the route returns the brain's listing.
+    expect(files).toContainEqual(expect.objectContaining({ path: "files/invoice.pdf", ext: "pdf", sizeBytes: INVOICE_PDF.length }));
+    expect(files).toEqual(await brain.files());
   });
 
   it("GET /api/files/* streams bytes with a content type", async () => {
     const res = await app.request("/api/files/invoice.pdf");
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("application/pdf");
-    expect(await res.text()).toBe("%PDF-1.4 fake invoice");
+    expect(await res.text()).toBe(INVOICE_PDF);
 
-    brain.addFile("files/sub dir/notes.md", "# hi");
+    await tb.addFile("files/sub dir/notes.md", "# hi");
     const md = await app.request("/api/files/sub%20dir/notes.md");
     expect(md.status).toBe(200);
     expect(md.headers.get("content-type")).toBe("text/plain; charset=utf-8");
 
-    brain.addFile("files/blob.xyz", "?");
+    await tb.addFile("files/blob.xyz", "?");
     expect((await app.request("/api/files/blob.xyz")).headers.get("content-type")).toBe("application/octet-stream");
   });
 
@@ -482,6 +630,8 @@ describe("files", () => {
 });
 
 describe("file responses", () => {
+  sharedBrain();
+
   it("sends the file inline with its name, nosniff, and Accept-Ranges", async () => {
     const res = await app.request("/api/files/invoice.pdf");
     expect(res.headers.get("content-disposition")).toBe(`inline; filename="invoice.pdf"; filename*=UTF-8''invoice.pdf`);
@@ -489,7 +639,7 @@ describe("file responses", () => {
     expect(res.headers.get("accept-ranges")).toBe("bytes");
     expect(res.headers.get("content-security-policy")).toBeNull();
 
-    brain.addFile("files/Résumé (final).pdf", "x");
+    await tb.addFile("files/Résumé (final).pdf", "x");
     const named = await app.request(`/api/files/${encodeURIComponent("Résumé (final).pdf")}`);
     expect(named.status).toBe(200);
     expect(named.headers.get("content-disposition")).toBe(
@@ -498,7 +648,7 @@ describe("file responses", () => {
   });
 
   it("answers a single Range with 206 and an unsatisfiable one with 416", async () => {
-    brain.addFile("files/clip.mp4", "0123456789");
+    await tb.addFile("files/clip.mp4", "0123456789");
     const get = (range?: string) => app.request("/api/files/clip.mp4", { headers: range ? { range } : {} });
 
     const full = await get();
@@ -537,7 +687,7 @@ describe("file responses", () => {
 
   it("serves text and markup as text/plain", async () => {
     for (const name of ["page.html", "page.htm", "page.xhtml", "feed.xml", "notes.md", "data.json", "run.log", "table.csv", "a.txt"]) {
-      brain.addFile(`files/${name}`, "<script>alert(1)</script>");
+      await tb.addFile(`files/${name}`, "<script>alert(1)</script>");
       const res = await app.request(`/api/files/${name}`);
       expect(res.headers.get("content-type"), name).toBe("text/plain; charset=utf-8");
       expect(res.headers.get("x-content-type-options"), name).toBe("nosniff");
@@ -545,7 +695,7 @@ describe("file responses", () => {
   });
 
   it("keeps svg as an image but sandboxes it", async () => {
-    brain.addFile("files/logo.svg", `<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`);
+    await tb.addFile("files/logo.svg", `<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`);
     const res = await app.request("/api/files/logo.svg");
     expect(res.headers.get("content-type")).toBe("image/svg+xml");
     expect(res.headers.get("content-security-policy")).toBe("sandbox");
@@ -574,6 +724,8 @@ describe("file responses", () => {
 });
 
 describe("request guard", () => {
+  sharedBrain();
+
   const status = async (url: string, init?: RequestInit) => (await app.request(url, init)).status;
 
   it("refuses a foreign Host header", async () => {
@@ -628,6 +780,8 @@ describe("request guard", () => {
 });
 
 describe("open and reveal (brain files)", () => {
+  sharedBrain();
+
   it("POST /api/open opens a brain file or folder and reports the absolute path", async () => {
     const res = await app.request("/api/open", json({ path: "files/invoice.pdf" }));
     expect(res.status).toBe(200);
@@ -650,8 +804,8 @@ describe("open and reveal (brain files)", () => {
   });
 
   it("refuses programs for open but still reveals them", async () => {
-    brain.addFile("files/setup.exe", "MZ");
-    brain.addFile("files/shortcut.lnk", "L");
+    await tb.addFile("files/setup.exe", "MZ");
+    await tb.addFile("files/shortcut.lnk", "L");
     for (const p of ["files/setup.exe", "files/shortcut.lnk"]) {
       const res = await app.request("/api/open", json({ path: p }));
       expect(res.status, p).toBe(403);
@@ -663,8 +817,7 @@ describe("open and reveal (brain files)", () => {
   });
 
   it("refuses a link that reaches .git without naming it", async () => {
-    fs.mkdirSync(path.join(root, ".git"));
-    fs.writeFileSync(path.join(root, ".git", "config"), "[core]");
+    // The brain's real .git holds a config file.
     fs.symlinkSync(path.join(root, ".git"), path.join(root, "files", "gitlink"), "junction");
     const res = await app.request("/api/reveal", json({ path: "files/gitlink/config" }));
     expect(res.status).toBe(403);
@@ -688,7 +841,7 @@ describe.runIf(process.platform === "win32")("files outside the brain", () => {
   let outside: string;
   let pdf: string;
 
-  beforeEach(() => {
+  sharedBrain(async (t) => {
     outside = fs.mkdtempSync(path.join(os.tmpdir(), "npp-outside-"));
     pdf = path.join(outside, "Module 1.pdf");
     fs.writeFileSync(pdf, "%PDF module one");
@@ -696,21 +849,23 @@ describe.runIf(process.platform === "win32")("files outside the brain", () => {
     fs.writeFileSync(path.join(outside, "Fenced.pdf"), "%PDF fenced");
     fs.writeFileSync(path.join(outside, "setup.exe"), "MZ");
     fs.writeFileSync(path.join(outside, "Desktop.lnk"), "L");
-    brain.seed({
-      slug: "ethics",
-      frontmatter: { title: "Ethics", type: "note", summary: "s", tags: [] },
-      body: [
-        `Module 1 is at \`${pdf}\`.`,
-        `Folder: \`${outside}\`. Installer \`${path.join(outside, "setup.exe")}\`, shortcut \`${path.join(outside, "Desktop.lnk")}\`.`,
-        `Gone: \`${path.join(outside, "Missing.pdf")}\``,
-        "```",
-        `\`${path.join(outside, "Fenced.pdf")}\``,
-        "```",
-      ].join("\n"),
-    });
+    await t.writeNotes([
+      {
+        slug: "ethics",
+        frontmatter: { title: "Ethics", type: "note", summary: "s", tags: [] },
+        body: [
+          `Module 1 is at \`${pdf}\`.`,
+          `Folder: \`${outside}\`. Installer \`${path.join(outside, "setup.exe")}\`, shortcut \`${path.join(outside, "Desktop.lnk")}\`.`,
+          `Gone: \`${path.join(outside, "Missing.pdf")}\``,
+          "```",
+          `\`${path.join(outside, "Fenced.pdf")}\``,
+          "```",
+        ].join("\n"),
+      },
+    ]);
   });
 
-  afterEach(() => {
+  afterAll(() => {
     fs.rmSync(outside, { recursive: true, force: true });
   });
 
@@ -738,9 +893,7 @@ describe.runIf(process.platform === "win32")("files outside the brain", () => {
   });
 
   it("GET /api/local-file allows absolute paths inside the brain, except .git", async () => {
-    expect(await (await localFile(path.join(root, "files", "invoice.pdf"))).text()).toBe("%PDF-1.4 fake invoice");
-    fs.mkdirSync(path.join(root, ".git"));
-    fs.writeFileSync(path.join(root, ".git", "config"), "[core]");
+    expect(await (await localFile(path.join(root, "files", "invoice.pdf"))).text()).toBe(INVOICE_PDF);
     expect((await localFile(path.join(root, ".git", "config"))).status).toBe(403);
     expect((await localFile(path.join(root, ".GIT", "config").replace(/\\/g, "/"))).status).toBe(403);
   });
@@ -787,12 +940,16 @@ describe.runIf(process.platform === "win32")("files outside the brain", () => {
 });
 
 describe("maintenance", () => {
+  sharedBrain();
+
   it("GET /api/check-links returns a LinkReport", async () => {
-    brain.seed({
-      slug: "dangling",
-      frontmatter: { title: "Dangling", type: "note", summary: "s", tags: [], sources: ["gone"], files: ["files/missing.pdf"] },
-      body: "[[nowhere]]",
-    });
+    await tb.writeNotes([
+      {
+        slug: "dangling",
+        frontmatter: { title: "Dangling", type: "note", summary: "s", tags: [], sources: ["gone"], files: ["files/missing.pdf"] },
+        body: "[[nowhere]]",
+      },
+    ]);
     const res = await app.request("/api/check-links");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
@@ -804,11 +961,20 @@ describe("maintenance", () => {
   });
 
   it("GET /api/stats and POST /api/reindex", async () => {
-    expect(await (await app.request("/api/stats")).json()).toEqual({ notes: 3, files: 1, invalid: 0 });
+    const stats = async () => (await (await app.request("/api/stats")).json()) as { notes: number; files: number; invalid: number };
+    // The check-links test may already have added a note to this brain.
+    const before = await stats();
+    expect(before).toEqual({ notes: expect.any(Number), files: 1, invalid: 0 });
+    expect(before.notes).toBeGreaterThanOrEqual(3);
+
+    // A note put on disk behind the brain's back reaches the index only through a reindex.
+    await tb.addFile("notes/stray.md", "---\ntitle: Stray\ntype: note\nsummary: s\ntags: []\ncreated: 2026-09-01\nupdated: 2026-09-01\n---\nStray.\n");
+    expect(await stats()).toEqual(before);
+
     const res = await app.request("/api/reindex", { method: "POST" });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ notes: 3, files: 1, invalid: 0, durationMs: 3 });
-    expect(brain.reindexCalls).toBe(1);
+    expect(await res.json()).toEqual({ ...before, notes: before.notes + 1, durationMs: expect.any(Number) });
+    expect(await stats()).toEqual({ ...before, notes: before.notes + 1 });
   });
 
   it("GET /api/health reports the brain path", async () => {
@@ -819,16 +985,19 @@ describe("maintenance", () => {
 });
 
 describe("conventions", () => {
+  sharedBrain();
+  beforeEach(writeConventions);
+
   it("serves the three convention files as markdown", async () => {
-    const root = await app.request("/api/conventions");
-    expect(root.status).toBe(200);
-    expect(root.headers.get("content-type")).toBe("text/markdown; charset=utf-8");
-    expect(await root.text()).toContain("# Conventions");
+    const res = await app.request("/api/conventions");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("text/markdown; charset=utf-8");
+    expect(await res.text()).toContain("# Conventions");
 
     for (const [name, heading] of [["conventions", "# Conventions"], ["file", "# File skill"], ["garden", "# Garden skill"]]) {
-      const res = await app.request(`/api/conventions/${name}`);
-      expect(res.status).toBe(200);
-      expect(await res.text()).toContain(heading);
+      const named = await app.request(`/api/conventions/${name}`);
+      expect(named.status).toBe(200);
+      expect(await named.text()).toContain(heading);
     }
   });
 
@@ -843,8 +1012,10 @@ describe("conventions", () => {
 });
 
 describe("errors", () => {
+  sharedBrain();
+
   it("maps unknown errors to 500 with code internal", async () => {
-    brain.failures.set("stats", new Error("disk on fire"));
+    vi.spyOn(brain, "stats").mockRejectedValueOnce(new Error("disk on fire"));
     const res = await app.request("/api/stats");
     expect(res.status).toBe(500);
     expect(await res.json()).toEqual({ error: { code: "internal", message: "disk on fire" } });

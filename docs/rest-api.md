@@ -4,10 +4,10 @@ Base: `http://localhost:${PORT}`. The server listens on 127.0.0.1 only. JSON in,
 
 Every mutating request may send `X-Brain-Tool: <name>` (default `api`). It becomes the `WriteMeta.tool` in the git commit message.
 
-Errors: status from `BrainError.status` (400 validation, 403 forbidden, 404 not found, 409 conflict, 415 unsupported_media_type, 416 range_not_satisfiable), 500 otherwise. Body:
+Errors: status from `BrainError.status` (400 validation, 403 forbidden, 404 not found, 409 conflict, 415 unsupported_media_type, 416 range_not_satisfiable), 500 otherwise. 409 `conflict` comes only from `expectedMtimeMs` (the file changed since it was read, or no longer exists). Name clashes are 400 `validation`: creating a tag that exists, renaming to a taken slug, or taking an inbox item onto a taken slug. Body:
 
 ```json
-{ "error": { "code": "validation", "message": "unknown tags: foo" } }
+{ "error": { "code": "validation", "message": "unknown tags: foo. Create them with createTag first." } }
 ```
 
 | Method | Path | Body | Response |

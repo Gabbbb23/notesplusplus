@@ -282,14 +282,31 @@ export interface SearchIndex {
 
 /**
  * The facade the API, web UI, and MCP server use. Composes store and index so a write
- * always updates both. This is the only thing the outer layers import.
+ * always updates both. This is the only thing the outer layers import, and the store and
+ * index behind it are not reachable through it.
  */
 export interface Brain {
-  readonly store: NoteStore;
-  readonly index: SearchIndex;
+  /** Absolute path of the brain repo. */
+  readonly root: string;
+  /**
+   * Absolute path for a brain-relative path such as "files/invoice.pdf". Throws ValidationError for an
+   * absolute path or one that escapes the root. Checks the path only; the file need not exist.
+   */
+  resolve(relativePath: string): string;
 
-  init(): Promise<void>;
+  /**
+   * Create the folder layout and git repo if missing, then open the index. Call before anything else. Idempotent.
+   * When the index holds no notes (first run, or a schema or model change emptied it), builds it from disk and
+   * returns the stats of that build; otherwise returns null and leaves the index as it is.
+   */
+  init(): Promise<IndexStats | null>;
+  /** Drop the index and build it again from the files on disk. */
   reindex(): Promise<IndexStats>;
+  /**
+   * Close the index. Until init() runs again, search, backlinks, stats, and reindex fail, and writes still
+   * reach the store but log a missed index update.
+   */
+  close(): Promise<void>;
 
   /** Same notes and order as `NoteStore.list`. */
   list(filter?: ListFilter): Promise<NoteSummary[]>;

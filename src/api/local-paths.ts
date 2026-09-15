@@ -127,13 +127,13 @@ async function mentionedKeys(brain: Brain): Promise<Set<string>> {
  */
 export async function resolveAllowedPath(brain: Brain, input: string): Promise<{ abs: string; stat: fs.Stats }> {
   const requested = parseRequestedPath(input);
-  const root = brain.store.root;
+  const root = brain.root;
   const gitKey = pathKey(path.join(root, ".git"));
   const forbidden = () => new ForbiddenError(`${input} is not a brain file or a path mentioned in a note`);
 
   let abs: string;
   if (requested.kind === "brain") {
-    abs = brain.store.resolve(requested.rel);
+    abs = brain.resolve(requested.rel);
   } else {
     abs = requested.abs;
     const key = pathKey(abs);

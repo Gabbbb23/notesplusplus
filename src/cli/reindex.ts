@@ -10,10 +10,9 @@ const index = createIndex({
 });
 const brain = new BrainImpl(store, index);
 
-await brain.store.init();
-await brain.index.open();
-const stats = await brain.reindex();
-await brain.index.close();
+// init() already builds an empty index from disk; rebuild only when it did not, so one run never builds twice.
+const stats = (await brain.init()) ?? (await brain.reindex());
+await brain.close();
 
 console.log(`reindexed ${config.brainPath}`);
 console.log(`  notes:    ${stats.notes}`);

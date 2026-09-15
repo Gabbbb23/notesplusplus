@@ -301,7 +301,7 @@ export function createApi(brain: Brain, opts: ApiOptions): Hono {
     // c.req.path is already URI-decoded by Hono (reserved characters such as %2F stay encoded).
     const rel = c.req.path.replace(/^\/api\//, "");
     if (rel.split(/[\\/]/).some((seg) => seg === "..")) throw new ValidationError("path traversal rejected");
-    const abs = brain.store.resolve(rel);
+    const abs = brain.resolve(rel);
     let stat: fs.Stats;
     try {
       stat = await fs.promises.stat(abs);
@@ -363,7 +363,7 @@ export function createApi(brain: Brain, opts: ApiOptions): Hono {
 
   // ---- health ----
 
-  app.get("/api/health", (c) => c.json({ ok: true, brainPath: brain.store.root }));
+  app.get("/api/health", (c) => c.json({ ok: true, brainPath: brain.root }));
 
   // Anything else under /api is a JSON 404, even when this app is mounted next to the web UI.
   app.all("/api/*", (c) => c.json({ error: { code: "not_found", message: `no route for ${c.req.method} ${c.req.path}` } }, 404));

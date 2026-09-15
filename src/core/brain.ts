@@ -22,25 +22,36 @@ import type {
  * Composes the store and the index so every write reaches both.
  * The store is the source of truth; if an index update fails after a successful
  * write, the write stands and the error is logged. `reindex()` repairs the cache.
+ * Callers get the Brain interface only; the store and index stay private.
  */
 export class BrainImpl implements Brain {
   constructor(
-    public readonly store: NoteStore,
-    public readonly index: SearchIndex,
+    private readonly store: NoteStore,
+    private readonly index: SearchIndex,
     private readonly log: (msg: string) => void = (m) => console.error(m),
   ) {}
 
-  async init(): Promise<void> {
+  get root(): string {
+    return this.store.root;
+  }
+
+  resolve(relativePath: string): string {
+    return this.store.resolve(relativePath);
+  }
+
+  async init(): Promise<IndexStats | null> {
     await this.store.init();
     await this.index.open();
     const stats = await this.index.stats();
-    if (stats.notes === 0) {
-      await this.reindex();
-    }
+    return stats.notes === 0 ? this.reindex() : null;
   }
 
   reindex(): Promise<IndexStats> {
     return this.index.rebuild(this.store);
+  }
+
+  close(): Promise<void> {
+    return this.index.close();
   }
 
   list(filter?: ListFilter): Promise<NoteSummary[]> {
