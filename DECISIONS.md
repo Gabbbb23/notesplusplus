@@ -104,3 +104,46 @@ Because: The owner does not want to scroll sideways to read a table.
 ## 2026-09-14 — One shared component per UI pattern
 Decision: Tables, badges, cards, page headers, and long-text wrapping each live in one shared component under web/src/components. Pages compose them and never restyle these patterns locally. An architecture test fails when a page reaches past the shared component to the underlying shadcn primitive or hard-codes colours.
 Because: A design change should reach every page that uses the pattern from a single edit.
+
+## 2026-09-15 — College is the second domain, past years are not copied
+Decision: A `college` tag and hub for the owner's BSIT degree. The current semester's documents (4th year, 1st semester) are copied into `files/college/4th-year` and get notes. Past years get one note per subject that points at the original paths under `C:\Important Files\College Files`; their files stay where they are. JOB, SHS, unorganized files, and the Vivaldi browser profile inside College Junior Year are left out.
+Because: The owner asked for a college tag and asked how storage-efficient the brain is. The past years hold about 1 GB of documents, which would take about 2 GB inside the brain (working copy plus git history) for material that is rarely reopened. Any past subject can be copied in later when it needs full-text search.
+
+## 2026-09-15 — Notes in English, assignment outputs in the language asked
+Decision: Notes are written in English even when the source is Tagalog or Taglish, keeping Filipino terms with a short gloss. Work produced for an assignment, such as the GE09 reflection, is written in the language the assignment requires and filed as its own note.
+Because: The embedding model, bge-small-en-v1.5, is English-only, so notes in Tagalog would only be reachable through keyword search.
+
+## 2026-09-15 — Web UI opens files in the browser, the default app, or File Explorer
+Decision: Every file a note mentions gets View (in a browser tab, for PDFs, images, audio, video, and text), Open (in its default Windows app), and Show in folder (File Explorer with the file selected). Files outside the brain qualify only when a note mentions their absolute path in an inline code span. Open refuses programs and scripts (exe, bat, ps1, lnk, and anything not on a list of document, media, and archive types); Show in folder works on any allowed path. Every API request must come from localhost: a foreign Host or Origin, or a cross-site fetch, is refused, and the server listens on 127.0.0.1 only.
+Because: The owner wants to open college and Fields documents straight from their notes. An endpoint that launches files is reachable by any web page the browser visits and, before this change, by anyone on the same Wi-Fi, so it opens only what the brain already points at and never runs a program.
+Supersedes: nothing; the web UI stays read-only for notes.
+
+## 2026-09-15 — Breadcrumbs follow the hub chain
+Decision: Every page except Home shows breadcrumbs above its title. On a note they list the hubs from the root down to the hub that lists the note (Home › College › GE09 Life and Works of Rizal), found by the shortest chain of hub links from `index`; the current page is not repeated because its title sits right below. A note no hub reaches falls back to Home › Tags › its first tag. Other pages show Home, and the Tag page Home › Tags.
+Because: The owner asked for breadcrumbs for easier navigation. Notes sit in one flat folder, so hubs are the only hierarchy there is, and conventions already put every note in exactly one hub.
+
+## 2026-09-15 — Alt+K focuses search
+Decision: Alt+K moves focus to the search field from anywhere in the web UI, including while typing in another field. On the Search page it focuses that page's search box; elsewhere, the top bar's. The field shows the shortcut as two small keys, Alt and K, while it is empty and unfocused, and only on devices with a mouse or keyboard.
+Because: The owner asked for an Alt shortcut shown inside the search bar. Ctrl+K is taken by the browser's address bar search, and Alt+D, Alt+E, Alt+F (Chrome and Edge) and Alt+S (Firefox) are taken by browser menus and the address bar.
+
+## 2026-09-15 — Summaries are at most 240 characters
+Decision: A note's summary is one sentence of at most 240 characters that names the one or two facts the note is about. The server rejects a longer summary on write; existing longer ones still read. Lists of values move to the body.
+Because: The owner found notes hard to read: the web view shows the summary first, and summaries had grown into crammed run-on sentences (median 345 characters, 115 of 143 over 280). Shorter summaries also cost agents less context in search results and note lists.
+Supersedes: 2026-09-13 — Frontmatter field set (adds a length limit to `summary`; the field set is unchanged).
+
+## 2026-09-15 — Notes use tables, mermaid diagrams, and callouts
+Decision: Notes may hold GFM tables (at most 5 columns, the first naming the row), fenced `mermaid` diagrams (timeline, flowchart, sequenceDiagram, gantt, pie), and GitHub alert callouts (`> [!NOTE]` and its siblings). The web view renders diagrams as figures and callouts as notices; the markdown stays plain text. A diagram never holds a fact the rest of the note does not.
+Because: The owner wants the agent to store notes as tables and figures while keeping them human readable. INTENT.md requires notes to stay readable as plain markdown in any editor and never need the app to make sense, so a figure is an extra view of facts that are also written out.
+
+## 2026-09-15 — Pagination defaults
+Decision: `GET /api/notes` returns `{items, total, limit, offset}` with 100 per page (at most 500). `GET /api/tags` carries a count per tag. Search returns `hasMore`. MCP `list_notes` shows 50 per page with a footer naming the next offset; MCP `search` defaults to 10 results (at most 100). The web Search page shows 20 and re-queries with 20 more per "Show more" up to 100; the Tag page appends 50 at a time.
+Because: The owner asked for pagination where needed. Measured on 143 notes: the full note list is 81 KB and 59,000 characters (about 15k tokens) in an agent's context, MCP search at 20 results puts 28k characters in context while top-5 recall is already 0.90 to 0.97, and the web asked for 50 results that always came back full. Search re-queries with a larger limit instead of an offset so ranking stays consistent between pages.
+
+## 2026-09-15 — Keyword search drops stop words; semantic search has a floor
+Decision: Keyword search removes English and common Tagalog function words before both its AND and OR steps (falling back to the original words when nothing is left). Semantic candidates below cosine similarity 0.55 are dropped, in semantic mode and before hybrid fusion. Hybrid fusion weights stay as they are until a fix is checked against queries it was not tuned on.
+Because: On 29 labelled queries, hybrid ranked the right note first 55% of the time and semantic alone 69%; "when is the prelim exam this semester" matched the wrong note on "is" and "the". Dropping stop words raised hybrid MRR from 0.70 to 0.77, and the floor turned 50 results for unanswerable queries into 0 while keeping 97% of correct answers.
+
+## 2026-09-15 — Server listens on both loopback addresses
+Decision: The server listens on 127.0.0.1 and ::1, never on a public interface.
+Because: Listening on 127.0.0.1 alone made every `localhost` request try ::1 first and lose about 205 ms on Windows (measured: 0.205 s connect before, 0.0004 s after). Both addresses are loopback, so the "only this laptop" rule from the file-opening decision still holds.
+Supersedes: 2026-09-15 — Web UI opens files in the browser, the default app, or File Explorer (its "listens on 127.0.0.1 only" clause; loopback-only still holds).

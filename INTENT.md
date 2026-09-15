@@ -12,7 +12,7 @@ One person, the owner, on one Windows laptop. No accounts, no sharing, no hostin
 
 ## Current focus
 
-Phase one shipped on 2026-09-14: store, index, REST API, MCP server, web view. Focus now is daily use, starting with the Fields Group project as the first domain in the brain, and a proper web UI (React, Tailwind, shadcn, light Google-white theme) for reading and searching.
+Phase one shipped on 2026-09-14: store, index, REST API, MCP server, web view. Focus now is daily use with two domains in the brain, the Fields Group project and the owner's BSIT college subjects, and a web UI (React, Tailwind, shadcn, light Google-white theme) that makes notes easy to read, navigate, and search.
 
 Phase one scope, for reference:
 
@@ -23,7 +23,8 @@ Phase one scope, for reference:
 - SQLite index rebuilt from disk: FTS5 for keywords, local embeddings (small model, in-process, sqlite-vec) for semantic search. No external API.
 - REST API is the core. A stdio MCP server wraps it for Claude Code and Codex. The MCP server also serves the conventions as a resource and the `file` and `garden` skills as prompts, so rules cannot drift from the code that enforces them.
 - The agent has full write control and does not ask for confirmation. Every write is auto-committed so anything can be undone.
-- Web UI: read-only plus an inbox drop box. Home, note view with backlinks, search with smart/keyword/semantic modes, tags, files, link check. React single-page app built with Vite, Tailwind, and shadcn, served by the same Node process. Light theme only.
+- Web UI: read-only plus an inbox drop box. Home, note view with breadcrumbs and backlinks, search with smart/keyword/semantic modes and paged results (Alt+K to focus), tags, files, link check. Notes render tables, mermaid diagrams, and callouts. Any file a note mentions can be viewed in the browser, opened in its default app, or shown in File Explorer. React single-page app built with Vite, Tailwind, and shadcn, served by the same Node process on loopback only. Light theme only.
+- Notes stay short at the top: a summary of at most 240 characters, with lists of values in tables in the body.
 
 Done when: the owner can drop a transcript in the inbox, tell Claude Code to file it, and later find a specific fact from it through search in both the agent and the web UI.
 

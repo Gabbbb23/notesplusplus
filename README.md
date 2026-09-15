@@ -9,7 +9,7 @@ cp .env.example .env      # set BRAIN_PATH and PORT
 npm install
 npm run init-brain        # creates the brain repo layout if missing
 npm run build:web         # builds the web UI into web/dist (installs web/ deps first: npm --prefix web install)
-npm start                 # REST API + web UI on http://localhost:3777
+npm start                 # REST API + web UI on http://localhost:3777 (listens on 127.0.0.1 only)
 ```
 
 The MCP server for Claude Code and Codex runs as a separate stdio process (`npm run mcp`) and talks to the REST API over HTTP, so `npm start` must be running.
@@ -26,7 +26,8 @@ src/
     store/           NoteStore: files on disk, frontmatter, slugs, wikilinks, tags.yml, inbox, git auto-commit
     index/           SearchIndex: SQLite (node:sqlite) with FTS5, local embeddings, links table, file text extraction
     brain.ts         Brain facade composing store + index
-  api/               Hono REST routes over Brain. JSON in, JSON out.
+  api/               Hono REST routes over Brain. JSON in, JSON out. Also serves files for viewing and opens
+                     them in their default app or File Explorer (local-paths.ts holds the rules, launcher.ts the launch).
   mcp/               MCP stdio server. Thin HTTP client of the REST API. Serves conventions + prompts.
   cli/               init-brain, reindex
   server.ts          entry: api + static web UI from web/dist (SPA fallback for non-/api routes)

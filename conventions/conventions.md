@@ -53,10 +53,12 @@ Every note derived from a source lists the source slug in `sources` and links to
 
 ## Summaries
 
-One sentence, written for a future agent deciding whether to open the note. Put the answer in it, not a description of the answer.
+One sentence of at most 240 characters, written for a future agent deciding whether to open the note. Put the answer in it, not a description of the answer. Name the one or two facts the note is about and leave lists of values (schedules, grades, fee lines, dates) to the body, where a table holds them. The server rejects a longer summary. The web view shows the summary above the note, so a crammed one is the first thing the owner has to wade through.
 
 Vague: "Notes about the laptop."
+Crammed: "In AY 2026-27 1st semester the owner takes 7 subjects for 16 units in block CEIT-37-702A: ITE410 and ITE410L Monday 4:30 to 9:30 PM, ITP411 Tuesday 4:30 to 7:30 PM, ..."
 Good: "The owner's laptop is a Ryzen 7 7735HS with 16 GB RAM and an RTX 4050, bought March 2026."
+Good: "In AY 2026-27 1st semester the owner takes 7 subjects for 16 units in block CEIT-37-702A, with classes from Monday to Saturday."
 
 ## Tags
 
@@ -68,7 +70,7 @@ Tags are few and broad: `hardware`, `health`, `work`, `recipes`. They group whol
 - Keep it self-contained. A reader who lands on it from search must not need another note to understand it.
 - Name specific things: dates, numbers, names, versions, prices, file names. "Upgraded to Node 24 on 2026-09-01" beats "recently upgraded Node".
 - Several small notes beat one long one. Search returns notes; a long note buries the fact in the snippet.
-- In tables, give every column a unique header that names its unit: "Pilot US$/month", not a second "Pilot". On narrow screens the web view shows each row as label and value pairs, and repeated headers make the labels ambiguous.
+- When a note mentions a file outside the brain, write its full Windows path in backticks with nothing else inside them: `` `C:\Important Files\College Files\...\Module 1.pdf` ``. The web view turns that into View, Open, and Show in folder buttons. The server opens only paths that some note mentions this way, so a path written as plain text, or inside a fenced code block, gets no buttons.
 - End with a `## Related` section holding wikilinks to neighbouring notes and to the source.
 
 Example body:
@@ -82,6 +84,26 @@ It runs the brain's embedding model in-process without trouble; see [[local-embe
 - [[hardware]] hub
 - [[laptop-purchase-transcript]] source
 ```
+
+## Tables, diagrams, and callouts
+
+Structure makes a note readable when the material has a shape: records with the same fields, dates in order, steps in a process. Everything here is plain markdown, so the note still reads in any editor; the web view draws it as a table, a figure, or a highlighted box.
+
+Tables
+- Use a table for repeated records that share fields: a class schedule, grades, a budget, fee lines. Use a bullet list for anything else.
+- At most 5 columns. When records have more fields, split them into two tables that share the first column, or move the rarely needed fields into a list under the table. When columns do not fit, the web view turns each row into a stacked card, and a wide table reads worst that way.
+- The first column names the row (the subject, the fee line, the person), because a stacked card uses it as the card's title. Codes and IDs go in a later column.
+- Give every column a unique header that names its unit: "Pilot US$/month", not a second "Pilot". Stacked cards use the headers as labels, and repeated headers make the labels ambiguous.
+
+Diagrams
+- A fenced code block with the language `mermaid` renders as a figure in the web view and stays readable as text. Use `timeline` for dated events in order, `flowchart` for a process or a decision, `sequenceDiagram` for who hands what to whom, `gantt` for date ranges that overlap (a semester's exam weeks), and `pie` for shares of a total.
+- A diagram never holds a fact that the rest of the note does not. Every date, amount, and name in it also appears in a sentence, list, or table in the same note, so a plain-text reader and search both get it. Put one sentence before the diagram saying what it shows.
+- Keep a diagram to about 15 nodes or events; split a bigger one. Quote labels that contain punctuation: `A["ITP411 (Tuesday)"]`.
+
+Callouts
+- GitHub alert syntax marks a paragraph the owner must not miss: `> [!NOTE]`, `> [!TIP]`, `> [!IMPORTANT]`, `> [!WARNING]`, or `> [!CAUTION]` on the first line of a blockquote. Use one for a deadline, a known error inside a source document, or an action the owner has to take. One or two per note at most.
+
+No raw HTML, no images of tables, no ASCII-art diagrams.
 
 ## Hub maintenance
 
