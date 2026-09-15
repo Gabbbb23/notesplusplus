@@ -4,6 +4,18 @@ Pages compose these components. They never restyle tables, badges, cards, links,
 
 The shadcn primitives in `ui/` are the raw material. Only the module named below may import each one. When a primitive's own look should change for everyone, such as the Button default colours, change it in `ui/`.
 
+## Accessibility basics
+
+These hold for every page, and `npm test` checks each of them.
+
+- **Contrast.** Colours are tokens in `src/index.css`, and `test/contrast.test.ts` computes WCAG ratios from them. Text reaches 4.5:1 and control boundaries and focus outlines 3:1, on both the page (#F8F9FA) and cards (white).
+  - `--link` (#1967D2, `text-link`) is the link blue: 5.09:1 on the page, 5.37:1 on a card. `--link-hover` (#185ABC) is one step darker. `--primary` (#1A73E8) stays for filled buttons, where white text sits on it.
+  - `--input` (#80868B, `border-input`) is the border of an input, select, textarea, or toggle: 3.49:1 on the page, 3.68:1 on a card. Card, table, and divider hairlines keep `--border` (#DADCE0); they are not control boundaries.
+  - Every tinted pair reaches 4.5:1, and the test renders each `Notice` tone and each `KindBadge`, `StatusBadge`, and `FileTypeBadge` to check the classes they use. `--success` is Google Green 800 (#137333): 5.24:1 on the green tint, for the success notice and the hub and success badges. `--kind-source-fg` (#9E5600) is one step darker than Google Orange 900 on the same hue: 5.18:1 on the yellow tint, for the warning notice and the source and warning badges. A notice's message uses its title colour at full strength; a translucent `/90` would drop it below 4.5:1.
+- **Focus.** `FOCUS_RING` in `lib/focus-ring.ts` is the one keyboard focus style: a solid 2px outline in `--ring` (#1A73E8, 4.27:1 on the page), 2px outside the element, following its corners. It uses `focus-visible`, so a mouse click on a button shows nothing. Button, Input, SelectTrigger, Textarea, Toggle, ToggleGroupItem, TabsTrigger, the Sheet close button, Badge links, BreadcrumbLink, and `TextLink` carry it; a `:focus-visible` rule in `index.css` gives the same outline to anything else that takes focus, such as the sidebar links. A new interactive primitive adds `FOCUS_RING` to its classes.
+- **Motion.** Under `prefers-reduced-motion: reduce`, one rule set in `index.css` ends every animation and transition at once: spinners and skeletons stand still, and the sheet appears without sliding.
+- **Font.** Roboto 400, 400 italic, 500, and 700 ship inside the build from `@fontsource/roboto` (imported in `main.tsx`), so nothing loads from the network. Text set at 600 (`font-semibold`) draws with the 700 face. The stack is `Roboto, "Segoe UI", system-ui, sans-serif`; code uses `Consolas, "Cascadia Mono", ui-monospace, Menlo, monospace`.
+
 ## data-table.tsx
 
 Every table in the app. It is the only importer of `ui/table` and the only place that renders table markup.
@@ -44,7 +56,8 @@ As a last resort the text breaks anywhere.
 
 - `to` for an app route, opened in the same tab.
 - `href` for a file or site, opened in a new tab with `rel="noopener noreferrer"` and the external-link icon.
-- `variant`: `inline` (default, inherits size and weight), `strong` (medium weight), `title` (card title), or `muted` (breadcrumbs: muted text that turns foreground on hover, a hit area at least 24px tall, and a solid 2px focus ring in the ring colour).
+- `variant`: `inline` (default, inherits size and weight), `strong` (medium weight), `title` (card title), or `muted` (breadcrumbs: muted text that turns foreground on hover, and a hit area at least 24px tall).
+- Every variant but `muted` is `text-link`, turning `text-link-hover` and underlined on hover. Every variant has `FOCUS_RING` and a 4px radius, so the focus outline has soft corners.
 - String children wrap through `BreakableText`.
 
 ## file-actions.tsx
@@ -109,7 +122,18 @@ Small muted details about a thing.
 
 ## page-header.tsx
 
-`PageHeader` goes at the top of every page, Home included, and owns the page's only `h1`. It takes `title`, `description`, `aside` (a count on the right), `badge` (after the title), `breadcrumbs` (the items for `Breadcrumbs`, shown above the title row), and children for extra rows such as note metadata. Every page uses the same 24px heading.
+`PageHeader` goes at the top of every page, Home included, and owns the page's only `h1`. It takes `title`, `tabTitle`, `description`, `aside` (a count on the right), `badge` (after the title), `breadcrumbs` (the items for `Breadcrumbs`, shown above the title row), and children for extra rows such as note metadata. Every page uses the same 24px heading.
+
+It also sets the browser tab title, through `usePageTitle` in `lib/page-title.ts`, the only module that writes `document.title`. The title is `tabTitle` or, when that is left out, a string `title`, followed by " · notes++". When the header unmounts, the tab goes back to "notes++", so a page showing a loading or error state never keeps the previous page's title.
+
+| Page | Tab title | How |
+|---|---|---|
+| Home | notes++ | `tabTitle=""` |
+| A note | College · notes++ | the title |
+| Search | Search: rizal · notes++, or Search · notes++ with no query | `tabTitle` |
+| A tag | #college · notes++ | `tabTitle` |
+| Tags, Files, Inbox, Check | Tags · notes++, ... | the title |
+| Not found, a missing note | Not found · notes++, Note not found · notes++ | the title |
 
 ## breadcrumbs.tsx
 
@@ -186,7 +210,7 @@ Every keycap. It is the only module that renders a `<kbd>` element.
 ## page-state.tsx
 
 - `LoadingBlock` for grey bars while something loads.
-- `ErrorAlert` for an API error or the "server not reachable" hint, built on `Notice` with the danger tone.
+- `ErrorAlert` for an API error or the "server not reachable" hint, built on `Notice` with the danger tone. `onRetry` adds a "Try again" outline button inside the notice, under the message. Every page that loads data passes it: `reload` from `lib/use-async.ts`, or `retry` from `lib/use-paged-list.ts` on the Tag page, which fetches the page that failed again. Retrying shows the loading state, then the result in the notice's place. Where one notice stands for several requests, its retry reloads each one that failed: the note page reloads the note plus its backlinks and trail, Home the hub plus the stats. The Inbox form's "Could not add" notice has no retry; the form is resubmitted instead.
 - `EmptyState` for an empty list.
 - `NotFoundState` (`title`, `message`, `value`) for the note 404 and the not-found page: Home breadcrumbs, the title, one sentence ending in the missing value as code, and a Back home button.
 
@@ -211,6 +235,7 @@ It scans every `.ts` and `.tsx` file under `src` except `components/ui/`, plus `
 | `<kbd`, `createElement("kbd")` | `kbd.tsx` | `Kbd`, `KbdGroup` |
 | a `<Button>` whose label or attributes say "show more", "load more", "see more", or "view more" | `show-more.tsx` | `ShowMore` |
 | `hover:underline` | `text-link.tsx` | `TextLink` |
+| writing `document.title` | `lib/page-title.ts` | `PageHeader` with `title` or `tabTitle` |
 | `overflow-x-auto`, `overflow-x-scroll`, `overflow-auto`, `overflow-scroll`, `overflowX`, `overflow: "auto"` | nowhere | `DataTable` and `BreakableText` |
 | Tailwind palette colours (`text-red-600`, `bg-blue-50`, ...) | nowhere | a token class from `index.css` |
 | hex colours, `rgb(`, `rgba(`, `hsl(`, `oklch(` | nowhere | a token in `index.css` |

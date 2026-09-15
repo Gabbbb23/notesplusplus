@@ -20,7 +20,8 @@ describe("<TextLink>", () => {
     const link = screen.getByRole("link", { name: "fields-cloud-hosting-budget-v2" });
     expect(link).toHaveAttribute("href", "/notes/fields-cloud-hosting-budget-v2");
     expect(link).not.toHaveAttribute("target");
-    expect(link).toHaveClass("text-primary", "hover:underline");
+    expect(link).toHaveClass("text-link", "hover:text-link-hover", "hover:underline");
+    expect(link).not.toHaveClass("text-primary");
     expect(link.querySelector("[data-slot='breakable-text'] wbr")).not.toBeNull();
     expect(link.querySelector("[data-slot='external-link-icon']")).toBeNull();
   });
@@ -48,7 +49,7 @@ describe("<TextLink>", () => {
     expect(screen.getByRole("link", { name: "b" })).toHaveClass("font-medium", "text-base");
   });
 
-  it("muted is quiet: grey until hover, a 24px hit area, and a solid focus ring", () => {
+  it("muted is quiet: grey until hover, a 24px hit area, and the same focus ring", () => {
     inRouter(
       <TextLink to="/" variant="muted">
         Home
@@ -65,8 +66,8 @@ describe("<TextLink>", () => {
       "focus-visible:outline-offset-2",
       "focus-visible:outline-ring",
     );
-    expect(link).not.toHaveClass("text-primary");
-    expect(link).not.toHaveClass("hover:text-primary-hover");
+    expect(link).not.toHaveClass("text-link");
+    expect(link).not.toHaveClass("hover:text-link-hover");
   });
 });
 

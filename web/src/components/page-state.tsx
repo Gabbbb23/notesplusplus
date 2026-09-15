@@ -1,4 +1,4 @@
-import { PlugZapIcon } from "lucide-react";
+import { PlugZapIcon, RotateCwIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { BreakableText } from "@/components/breakable-text";
@@ -26,20 +26,44 @@ export function LoadingBlock({ lines = 4, className }: { lines?: number; classNa
   );
 }
 
+/** The "Try again" button inside an error notice, under its message. */
+function RetryButton({ onRetry }: { onRetry: () => void }) {
+  return (
+    <Button type="button" variant="outline" size="sm" className="mt-2" onClick={onRetry}>
+      <RotateCwIcon aria-hidden="true" />
+      Try again
+    </Button>
+  );
+}
+
+export interface ErrorAlertProps {
+  error: Error;
+  title?: string;
+  /**
+   * Runs the failed request again, such as `reload` from useAsync. Adds a "Try again" button inside
+   * the notice. Leave it out where retrying makes no sense, such as a form the user resubmits.
+   */
+  onRetry?: () => void;
+}
+
 /** An error from the API, or the "server not reachable" hint when fetch itself threw. */
-export function ErrorAlert({ error, title }: { error: Error; title?: string }) {
+export function ErrorAlert({ error, title, onRetry }: ErrorAlertProps) {
   if (error instanceof NetworkError) {
     return (
       <Notice tone="danger" icon={PlugZapIcon} title="Brain server not reachable">
-        The web UI could not reach the API. Start the server with <code className="font-mono">npm start</code> in the
-        project folder and reload this page.
+        <p>
+          The web UI could not reach the API. Start the server with <code className="font-mono">npm start</code> in the
+          project folder, then {onRetry ? "try again" : "reload this page"}.
+        </p>
+        {onRetry && <RetryButton onRetry={onRetry} />}
       </Notice>
     );
   }
   const heading = title ?? (error instanceof ApiError ? `Error ${error.status}` : "Something went wrong");
   return (
     <Notice tone="danger" title={heading}>
-      {error.message}
+      <p>{error.message}</p>
+      {onRetry && <RetryButton onRetry={onRetry} />}
     </Notice>
   );
 }

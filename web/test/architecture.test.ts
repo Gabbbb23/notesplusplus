@@ -10,9 +10,9 @@ import { describe, expect, it } from "vitest";
  * primitives in components/ui, composes the shared components in src/components. Nothing
  * reaches past them to a primitive, hand-builds a table, heading, link, alert, or keycap, places
  * breadcrumbs anywhere but PageHeader, builds a file URL instead of using FileActions, builds its
- * own "Show more" button instead of using ShowMore, scrolls sideways, restyles a primitive's
- * colours, or hard-codes a colour. src/index.css may only scroll
- * code blocks sideways.
+ * own "Show more" button instead of using ShowMore, writes document.title outside lib/page-title.ts,
+ * scrolls sideways, restyles a primitive's colours, or hard-codes a colour. src/index.css may only
+ * scroll code blocks sideways.
  *
  * Each rule has fixtures below proving it flags the pattern, so a rule that silently stops
  * matching fails the suite instead of passing it.
@@ -211,6 +211,8 @@ const RAW_KBD = /<kbd(?=[\s>/])|\b(?:createElement|jsxs?|jsxDEV)\s*\(\s*["'`]kbd
 const SCROLL_CLASS = /(?<![\w-])overflow-(?:x-)?(?:auto|scroll)(?![\w-])/;
 const SCROLL_STYLE = /\boverflowX\b|\boverflow\s*:\s*["'`](?:auto|scroll)["'`]|\boverflow(?:-x)?\s*:\s*(?:auto|scroll)\b/;
 const FILE_URL_CALL = /\b(fileUrl|localFileUrl|viewUrlFor)\s*\(/;
+/** An assignment to document.title (also through window or globalThis), not a comparison. */
+const TITLE_WRITE = /\b(?:(?:window|globalThis)\s*\.\s*)?document\s*\.\s*title\s*(?:[+]?=)(?!=)|\bReflect\.set\(\s*document\s*,\s*["'`]title["'`]/;
 const RENDERED_BREADCRUMBS = /<Breadcrumbs(?![\w.$])|\b(?:createElement|jsxs?|jsxDEV)\s*\(\s*Breadcrumbs\b/;
 const BREADCRUMB_ADVICE =
   "Pass the items to PageHeader's breadcrumbs prop (@/components/page-header), so every page places them the same way.";
@@ -293,6 +295,14 @@ const RULES: Rule[] = [
         ? `calls ${m[1]}(). Use FileActions or FileLink from @/components/file-actions, which give a file View, Open, and Show in folder.`
         : null;
     },
+  },
+  {
+    name: "document.title outside lib/page-title.ts",
+    allowed: ["lib/page-title.ts"],
+    check: (s) =>
+      TITLE_WRITE.test(withoutComments(s))
+        ? "writes document.title. Pass the title to PageHeader (tabTitle when it differs from the heading), which sets the tab title through usePageTitle in @/lib/page-title."
+        : null,
   },
   {
     name: "raw table markup",
@@ -456,6 +466,7 @@ describe("architecture: one shared component per UI pattern", () => {
       "components/layout.tsx",
       "components/show-more.tsx",
       "lib/breadcrumb-items.ts",
+      "lib/page-title.ts",
       "lib/rehype-table-cell-text.ts",
     ]) {
       expect(paths).toContain(expected);
@@ -573,6 +584,24 @@ describe("architecture: one shared component per UI pattern", () => {
       expect(flag(`<Button variant="ghost" aria-expanded={open}>Show source</Button>`)).toEqual([]);
       expect(flag(`<Button size="icon" aria-label="Open menu" />\n<p>Show more details below.</p>\n<Button>Go</Button>`)).toEqual([]);
       expect(flag(`// <Button>Show more</Button> lives in show-more.tsx\n<Button>Search</Button>`)).toEqual([]);
+    });
+
+    it("document.title written outside lib/page-title.ts", () => {
+      expect(flag(`useEffect(() => {
+  document.title = \`\${note.title} · notes++\`;
+}, [note]);`)[0]).toMatch(
+        /writes document\.title.*PageHeader.*usePageTitle/,
+      );
+      expect(flag(`document .title="Tags"`, "components/page-header.tsx")[0]).toMatch(/writes document\.title/);
+      expect(flag(`window.document.title = "x";`, "lib/anything.ts")[0]).toMatch(/writes document\.title/);
+      expect(flag(`document.title += " (1)";`)[0]).toMatch(/writes document\.title/);
+      expect(flag(`Reflect.set(document, "title", "x");`)[0]).toMatch(/writes document\.title/);
+      expect(flag(`document.title = pageTitle(name);`, "lib/page-title.ts")).toEqual([]);
+      // Reading or comparing the title, a comment, and another object's title are fine.
+      expect(flag(`const before = document.title;
+if (document.title === "notes++") log();`)).toEqual([]);
+      expect(flag(`// document.title = "x" happens in lib/page-title.ts
+note.title = "x";`)).toEqual([]);
     });
 
     it("raw table JSX, table roles, and created table elements outside data-table.tsx", () => {

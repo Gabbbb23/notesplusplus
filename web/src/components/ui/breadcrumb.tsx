@@ -1,4 +1,5 @@
 import * as React from "react"
+import { FOCUS_RING } from "@/lib/focus-ring"
 import { cn } from "@/lib/utils"
 import { ChevronRightIcon, MoreHorizontalIcon } from "lucide-react"
 import { Slot } from "radix-ui"
@@ -42,7 +43,7 @@ function BreadcrumbLink({
   return (
     <Comp
       data-slot="breadcrumb-link"
-      className={cn("transition-colors hover:text-foreground", className)}
+      className={cn("rounded-sm transition-colors hover:text-foreground", FOCUS_RING, className)}
       {...props}
     />
   )

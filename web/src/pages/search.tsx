@@ -102,7 +102,7 @@ export function SearchPage() {
 
   return (
     <>
-      <PageHeader title="Search" breadcrumbs={TOP_LEVEL_CRUMBS} />
+      <PageHeader title="Search" tabTitle={q ? `Search: ${q}` : "Search"} breadcrumbs={TOP_LEVEL_CRUMBS} />
       <form onSubmit={submit} className="mb-8 space-y-4" role="search" aria-label="Search notes and files">
         <div className="flex gap-2">
           <SearchInput
@@ -182,7 +182,13 @@ export function SearchPage() {
       )}
       {q !== "" && results.error && (
         <div className={shown ? "mt-4" : undefined}>
-          <ErrorAlert error={results.error} />
+          <ErrorAlert
+            error={results.error}
+            onRetry={() => {
+              results.reload();
+              if (tags.error) tags.reload();
+            }}
+          />
         </div>
       )}
     </>

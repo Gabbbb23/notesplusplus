@@ -14,10 +14,11 @@ const SHELL_CLASS = "rounded-lg p-4 wrap-break-word";
 
 const TONE_CLASS: Record<NoticeTone, string> = {
   info: "border-primary/40 bg-accent text-accent-foreground *:data-[slot=alert-description]:text-foreground/90",
-  success: "border-success/40 bg-success-tint text-success *:data-[slot=alert-description]:text-success/90",
+  // The success, warning, and danger messages share the title colour. test/contrast.test.ts checks every tone at 4.5:1.
+  success: "border-success/40 bg-success-tint text-success *:data-[slot=alert-description]:text-success",
   warning:
-    "border-status-warning-fg/40 bg-status-warning-bg text-status-warning-fg *:data-[slot=alert-description]:text-status-warning-fg/90",
-  danger: "bg-card text-destructive *:data-[slot=alert-description]:text-destructive/90",
+    "border-status-warning-fg/40 bg-status-warning-bg text-status-warning-fg *:data-[slot=alert-description]:text-status-warning-fg",
+  danger: "bg-card text-destructive *:data-[slot=alert-description]:text-destructive",
 };
 
 const TONE_ICON: Record<NoticeTone, LucideIcon> = {

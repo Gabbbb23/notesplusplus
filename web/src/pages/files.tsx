@@ -30,12 +30,12 @@ const columns: Column<FileEntry>[] = [
 ];
 
 export function FilesPage() {
-  const { data, error, loading } = useAsync(() => api.files(), []);
+  const { data, error, loading, reload } = useAsync(() => api.files(), []);
   return (
     <>
       <PageHeader title="Files" aside={data && plural(data.length, "file")} breadcrumbs={TOP_LEVEL_CRUMBS} />
       {loading && <LoadingBlock lines={6} />}
-      {error && <ErrorAlert error={error} />}
+      {error && <ErrorAlert error={error} onRetry={reload} />}
       {data && (
         <DataTable columns={columns} rows={data} rowKey={(f) => f.path} caption="Files" empty="No files yet." />
       )}

@@ -31,12 +31,12 @@ const columns: Column<TagWithCount>[] = [
 
 /** One request: GET /api/tags carries each tag's note count. */
 export function TagsPage() {
-  const { data, error, loading } = useAsync(() => api.tags(), []);
+  const { data, error, loading, reload } = useAsync(() => api.tags(), []);
   return (
     <>
       <PageHeader title="Tags" breadcrumbs={TOP_LEVEL_CRUMBS} />
       {loading && <LoadingBlock lines={6} />}
-      {error && <ErrorAlert error={error} />}
+      {error && <ErrorAlert error={error} onRetry={reload} />}
       {data && <DataTable columns={columns} rows={data} rowKey={(t) => t.name} caption="Tags" empty="No tags yet." />}
     </>
   );

@@ -6,11 +6,12 @@ import { Notice } from "@/components/notice";
 import { PageHeader } from "@/components/page-header";
 import { ErrorAlert, LoadingBlock } from "@/components/page-state";
 import { TextLink } from "@/components/text-link";
-import { api, ApiError, noteUrl } from "@/lib/api";
-import { useAsync } from "@/lib/use-async";
+import { api, ApiError, noteUrl, type Stats } from "@/lib/api";
+import { useAsync, type AsyncState } from "@/lib/use-async";
 
-function StatsStrip() {
-  const { data, error, loading } = useAsync(() => api.stats(), []);
+/** Hidden when the stats fail to load; the hub's error notice below offers Try again for both. */
+function StatsStrip({ stats }: { stats: AsyncState<Stats> }) {
+  const { data, error, loading } = stats;
   if (error) return null;
   const value = (n: number | undefined) => (loading ? undefined : n);
   return (
@@ -28,11 +29,16 @@ function StatsStrip() {
  */
 export function HomePage() {
   const hub = useAsync(() => api.getNote("index"), []);
+  const stats = useAsync(() => api.stats(), []);
   const missing = hub.error instanceof ApiError && hub.error.status === 404;
+  const retry = () => {
+    hub.reload();
+    if (stats.error) stats.reload();
+  };
 
   return (
     <>
-      <PageHeader title={hub.data?.title ?? "Home"} description={hub.data?.summary || undefined}>
+      <PageHeader title={hub.data?.title ?? "Home"} tabTitle="" description={hub.data?.summary || undefined}>
         {hub.data && (
           <MetaRow>
             <TagBadges tags={hub.data.tags} />
@@ -41,7 +47,7 @@ export function HomePage() {
           </MetaRow>
         )}
       </PageHeader>
-      <StatsStrip />
+      <StatsStrip stats={stats} />
       {hub.loading && <LoadingBlock lines={8} />}
       {missing && (
         <Notice tone="info" title="No root hub yet">
@@ -50,7 +56,7 @@ export function HomePage() {
           the index hub.
         </Notice>
       )}
-      {hub.error && !missing && <ErrorAlert error={hub.error} />}
+      {hub.error && !missing && <ErrorAlert error={hub.error} onRetry={retry} />}
       {hub.data && (
         <article>
           <NoteBody markdown={hub.data.body} />

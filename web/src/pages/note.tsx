@@ -21,13 +21,19 @@ export function NotePage() {
   const note = useAsync(() => api.getNote(slug), [slug]);
   const backlinks = useAsync(() => api.backlinks(slug), [slug]);
   const trail = useAsync(() => api.noteTrail(slug), [slug]);
+  // The whole page is the error notice when the note fails, so Try again reloads every part that failed with it.
+  const retryPage = () => {
+    note.reload();
+    if (backlinks.error) backlinks.reload();
+    if (trail.error) trail.reload();
+  };
 
   if (note.loading) return <LoadingBlock lines={10} />;
   if (note.error) {
     if (note.error instanceof ApiError && note.error.status === 404) {
       return <NotFoundState title="Note not found" message="There is no note with the slug" value={slug} />;
     }
-    return <ErrorAlert error={note.error} />;
+    return <ErrorAlert error={note.error} onRetry={retryPage} />;
   }
   if (!note.data) return null;
 
@@ -80,7 +86,7 @@ export function NotePage() {
       <section aria-labelledby="backlinks-heading" className="space-y-4">
         <SectionHeading id="backlinks-heading">Backlinks</SectionHeading>
         {backlinks.loading && <LoadingCards count={2} />}
-        {backlinks.error && <ErrorAlert error={backlinks.error} />}
+        {backlinks.error && <ErrorAlert error={backlinks.error} onRetry={backlinks.reload} />}
         {backlinks.data && <NoteList notes={backlinks.data} empty="No notes link here." />}
       </section>
     </article>

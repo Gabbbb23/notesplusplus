@@ -14,9 +14,17 @@
   --card-foreground: #202124;
   --popover: #ffffff;
   --popover-foreground: #202124;
+  /* Filled buttons: white text on blue. */
   --primary: #1a73e8;
   --primary-hover: #1967d2;
   --primary-foreground: #ffffff;
+  /*
+   * Link text, one step darker than --primary so it reaches WCAG AA (4.5:1) on the page and on cards:
+   * 5.09:1 on #f8f9fa and 5.37:1 on white. Hover is one step darker again.
+   * test/contrast.test.ts checks these ratios.
+   */
+  --link: #1967d2;
+  --link-hover: #185abc;
   --secondary: #f1f3f4;
   --secondary-foreground: #202124;
   --muted: #f1f3f4;
@@ -25,10 +33,20 @@
   --accent-foreground: #1967d2;
   --destructive: #d93025;
   --destructive-foreground: #ffffff;
-  --success: #188038;
+  /*
+   * Google Green 800. Text in a success notice and on hub and success badges, on --success-tint:
+   * 5.24:1. Green 700 (#188038) gave 4.42:1.
+   */
+  --success: #137333;
   --warning: #f9ab00;
+  /* Hairlines on cards, tables, and dividers. Not a control boundary, so no contrast minimum. */
   --border: #dadce0;
-  --input: #dadce0;
+  /*
+   * The boundary of a form control (input, select, textarea, toggle): at least 3:1 against the
+   * surface it sits on, as WCAG 1.4.11 asks. 3.49:1 on #f8f9fa, 3.68:1 on white.
+   */
+  --input: #80868b;
+  /* The keyboard focus outline (lib/focus-ring.ts): 4.27:1 on #f8f9fa, 4.51:1 on white. */
   --ring: #1a73e8;
   --mark: #fef7c3;
 
@@ -44,7 +62,11 @@
   --kind-hub-bg: var(--success-tint);
   --kind-hub-fg: var(--success);
   --kind-source-bg: #fef7e0;
-  --kind-source-fg: #b06000;
+  /*
+   * Warning text: a warning notice, source and warning badges. One step darker than Google Orange 900
+   * (#b06000, 4.34:1 on #fef7e0) on the same hue, to reach 5.18:1. test/contrast.test.ts checks every tint pair.
+   */
+  --kind-source-fg: #9e5600;
   --kind-file-bg: #f3e8fd;
   --kind-file-fg: #681da8;
 
@@ -68,8 +90,13 @@
 }
 
 @theme inline {
-  --font-sans: "Google Sans", Roboto, "Segoe UI", system-ui, sans-serif;
-  --font-mono: "Roboto Mono", Consolas, "Cascadia Mono", ui-monospace, monospace;
+  /*
+   * Roboto ships inside the build (main.tsx imports @fontsource/roboto 400, 500, 700, and 400 italic),
+   * so the app looks the same on any machine and never fetches a font. Segoe UI stands in while it loads.
+   * Code uses the monospace fonts Windows already has.
+   */
+  --font-sans: Roboto, "Segoe UI", system-ui, sans-serif;
+  --font-mono: Consolas, "Cascadia Mono", ui-monospace, Menlo, monospace;
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -85,6 +112,8 @@
   --color-primary: var(--primary);
   --color-primary-hover: var(--primary-hover);
   --color-primary-foreground: var(--primary-foreground);
+  --color-link: var(--link);
+  --color-link-hover: var(--link-hover);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
@@ -132,7 +161,15 @@
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border outline-ring;
+  }
+  /*
+   * The keyboard focus outline for anything without its own: sidebar links, the brand link, stat cards.
+   * The same look as FOCUS_RING in lib/focus-ring.ts, which the primitives and TextLink carry.
+   */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
   }
   html {
     color-scheme: light;
@@ -144,6 +181,22 @@
   }
   mark {
     @apply rounded-sm bg-mark px-0.5 text-foreground;
+  }
+
+  /*
+   * Reduced motion: every animation and transition finishes at once. Spinners and skeleton
+   * pulses stand still, and the sheet, tooltips, and focus changes appear without moving.
+   * !important inside a layer outranks any utility, including one marked important.
+   */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 

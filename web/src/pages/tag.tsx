@@ -25,6 +25,7 @@ export function TagPage() {
     <>
       <PageHeader
         title={<TagName name={tag} />}
+        tabTitle={`#${tag}`}
         breadcrumbs={TAG_PAGE_CRUMBS}
         aside={notes.total !== undefined && plural(notes.total, "note")}
         description={description || undefined}
@@ -48,7 +49,7 @@ export function TagPage() {
       )}
       {notes.error && (
         <div className={notes.items ? "mt-4" : undefined}>
-          <ErrorAlert error={notes.error} />
+          <ErrorAlert error={notes.error} onRetry={notes.retry} />
         </div>
       )}
     </>

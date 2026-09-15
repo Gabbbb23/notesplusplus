@@ -85,7 +85,7 @@ function Report({ r }: { r: LinkReport }) {
 }
 
 export function CheckPage() {
-  const { data, error, loading } = useAsync(() => api.checkLinks(), []);
+  const { data, error, loading, reload } = useAsync(() => api.checkLinks(), []);
   return (
     <>
       <PageHeader
@@ -98,7 +98,7 @@ export function CheckPage() {
         }
       />
       {loading && <LoadingBlock lines={6} />}
-      {error && <ErrorAlert error={error} />}
+      {error && <ErrorAlert error={error} onRetry={reload} />}
       {data && <Report r={data} />}
     </>
   );

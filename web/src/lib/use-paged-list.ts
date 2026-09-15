@@ -18,6 +18,11 @@ export interface PagedList<T> {
   hasMore: boolean;
   /** Fetch the page at offset items.length and append it. Ignored while a page loads. */
   more: () => void;
+  /**
+   * Fetch the page that failed again: the first page when none has loaded, otherwise the next one.
+   * Ignored while a page loads.
+   */
+  retry: () => void;
 }
 
 interface State<T> {
@@ -78,6 +83,12 @@ export function usePagedList<T>(fetchPage: (offset: number) => Promise<Page<T>>,
     load(items.length);
   }, [loading, items, load]);
 
+  // A failed page never changes items, so the page to fetch again always starts at items.length.
+  const retry = useCallback(() => {
+    if (loading) return;
+    load(items?.length ?? 0);
+  }, [loading, items, load]);
+
   const hasMore = items !== undefined && total !== undefined && !exhausted && items.length < total;
-  return { items, total, error, loading, hasMore, more };
+  return { items, total, error, loading, hasMore, more, retry };
 }

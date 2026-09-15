@@ -92,7 +92,7 @@ export function InboxPage() {
       <PageHeader title="Inbox" description="Material waiting for the agent." breadcrumbs={TOP_LEVEL_CRUMBS} />
       <div className="mb-8">
         {items.loading && <LoadingBlock lines={3} />}
-        {items.error && <ErrorAlert error={items.error} />}
+        {items.error && <ErrorAlert error={items.error} onRetry={items.reload} />}
         {items.data && (
           <DataTable
             columns={columns}

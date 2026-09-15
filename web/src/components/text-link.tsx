@@ -2,6 +2,7 @@ import { ExternalLinkIcon } from "lucide-react";
 import type { AnchorHTMLAttributes, ReactNode } from "react";
 import { Link } from "react-router";
 import { BreakableText } from "@/components/breakable-text";
+import { FOCUS_RING } from "@/lib/focus-ring";
 import { cn } from "@/lib/utils";
 
 /*
@@ -9,10 +10,14 @@ import { cn } from "@/lib/utils";
  * bodies. This is the only module that styles a link or draws the external-link icon.
  */
 
-const LINK_CLASS = "min-w-0 hover:underline";
+/** Every variant: underline on hover, and the app's keyboard focus outline with a small radius. */
+const LINK_CLASS = `min-w-0 rounded-sm hover:underline ${FOCUS_RING}`;
 
-/** The blue of every link except the quiet wayfinding ones. */
-const PRIMARY = "text-primary hover:text-primary-hover";
+/**
+ * The link blue of every link except the quiet wayfinding ones: --link, darker than the button blue
+ * so it reaches 4.5:1 on the page and on cards, and one step darker again on hover.
+ */
+const PRIMARY = "text-link hover:text-link-hover";
 
 export type TextLinkVariant = "inline" | "strong" | "title" | "muted";
 
@@ -24,11 +29,10 @@ const VARIANT_CLASS: Record<TextLinkVariant, string> = {
   /** A card title. */
   title: `${PRIMARY} text-base font-medium`,
   /**
-   * Quiet wayfinding, such as a breadcrumb: muted text that turns foreground on hover, a hit area at
-   * least 24px tall (padding only, no visual change), and a plainly visible focus ring.
+   * Quiet wayfinding, such as a breadcrumb: muted text that turns foreground on hover, and a hit area at
+   * least 24px tall (padding only, no visual change).
    */
-  muted:
-    "inline-block min-h-6 rounded-sm py-0.5 text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+  muted: "inline-block min-h-6 py-0.5 text-muted-foreground hover:text-foreground",
 };
 
 /** Shown after an external link's text. Sits inline so it follows the last line of wrapped text. */

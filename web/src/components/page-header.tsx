@@ -2,14 +2,18 @@ import type { ReactNode } from "react";
 import { BreakableText } from "@/components/breakable-text";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import type { Crumb } from "@/lib/breadcrumb-items";
+import { usePageTitle } from "@/lib/page-title";
 
 /**
  * The top of every page: optional breadcrumbs, then one h1 size everywhere, an optional badge
  * after the title, an optional aside on the right (a count), a muted description, and optional
  * extra rows (note metadata). A string title wraps at natural break points.
+ *
+ * It also sets the browser tab title, "<tabTitle> · notes++", for as long as it is on screen.
  */
 export function PageHeader({
   title,
+  tabTitle,
   description,
   aside,
   badge,
@@ -17,6 +21,12 @@ export function PageHeader({
   children,
 }: {
   title: ReactNode;
+  /**
+   * The tab title before " · notes++". Defaults to `title` when that is a string. Pass it when the
+   * title is not plain text (a tag) or the tab should say more (a search query); pass "" for the app
+   * name alone, as Home does.
+   */
+  tabTitle?: string;
   description?: ReactNode;
   aside?: ReactNode;
   badge?: ReactNode;
@@ -25,6 +35,7 @@ export function PageHeader({
   /** Extra header content under the description, such as a note's tags and dates. */
   children?: ReactNode;
 }) {
+  usePageTitle(tabTitle ?? (typeof title === "string" ? title : undefined));
   return (
     <header data-slot="page-header" className="mb-6 min-w-0 space-y-2 wrap-break-word">
       {breadcrumbs && <Breadcrumbs items={breadcrumbs} />}
