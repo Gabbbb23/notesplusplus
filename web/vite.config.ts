@@ -39,5 +39,7 @@ export default defineConfig({
     setupFiles: ["./test/setup.ts"],
     include: ["test/**/*.test.{ts,tsx}"],
     css: false,
+    // Page tests render whole pages in jsdom (the Tag page draws 93 cards); 5 s timed out when the laptop was busy.
+    testTimeout: 15_000,
   },
 });
