@@ -345,6 +345,51 @@ describe("keyword search", () => {
   });
 });
 
+// ---- bm25 column weights -----------------------------------------------------
+
+/**
+ * What FTS5's bm25 gives a term found once, in a column of weight `w`, in a row of average length: the term's idf
+ * times w·(k1 + 1) / (w + k1), with k1 = 1.2. Dividing a score by the idf leaves this.
+ */
+const bm25OnceOverIdf = (w: number): number => (w * 2.2) / (w + 1.2);
+const idf = (rows: number, rowsWithTerm: number): number => Math.log((rows - rowsWithTerm + 0.5) / (rowsWithTerm + 0.5));
+
+describe("bm25 column weights", () => {
+  test("a word in the title outranks the same word in the summary, tags, or body, weighted 4, 3, 2, 1", async () => {
+    const { idx } = await makeIndex();
+    // Every note has the same number of words in each column (title 2, summary 2, tags 1, body 2), so the only
+    // difference between the four matches is the column that holds "quokka". Six notes without it keep the idf positive.
+    const same = { title: "filler filler", summary: "filler filler", tags: ["filler"], body: "filler filler" };
+    await idx.upsertNote(note({ slug: "in-body", ...same, body: "quokka filler" }));
+    await idx.upsertNote(note({ slug: "in-tags", ...same, tags: ["quokka"] }));
+    await idx.upsertNote(note({ slug: "in-summary", ...same, summary: "quokka filler" }));
+    await idx.upsertNote(note({ slug: "in-title", ...same, title: "quokka filler" }));
+    for (let i = 0; i < 6; i++) await idx.upsertNote(note({ slug: `other-${i}`, ...same }));
+
+    const hits = await idx.search("quokka", { mode: "keyword" });
+    expect(hits.map((h) => h.id)).toEqual(["in-title", "in-summary", "in-tags", "in-body"]);
+    expect(hits.map((h) => h.score / idf(10, 4))).toEqual([4, 3, 2, 1].map((w) => expect.closeTo(bm25OnceOverIdf(w), 6)));
+  });
+
+  test("a file whose name holds the word outranks one whose text holds it, weighted 3 and 1", async () => {
+    const { idx } = await makeIndex();
+    const root = await tempDir();
+    // Every file has two title words (name and extension) and two words of text.
+    const put = async (name: string, text: string): Promise<void> => {
+      const abs = path.join(root, name);
+      await fs.writeFile(abs, text);
+      await idx.upsertFile({ path: `files/${name}`, ext: "txt", sizeBytes: text.length, mtimeMs: 1 }, abs);
+    };
+    await put("filler.txt", "quokka filler");
+    await put("quokka.txt", "filler filler");
+    for (let i = 0; i < 6; i++) await put(`other${i}.txt`, "filler filler");
+
+    const hits = await idx.search("quokka", { mode: "keyword" });
+    expect(hits.map((h) => h.id)).toEqual(["files/quokka.txt", "files/filler.txt"]);
+    expect(hits.map((h) => h.score / idf(8, 2))).toEqual([3, 1].map((w) => expect.closeTo(bm25OnceOverIdf(w), 6)));
+  });
+});
+
 // ---- FTS rows ----------------------------------------------------------------
 
 describe("FTS rows follow their note or file by rowid", () => {
@@ -689,6 +734,46 @@ for (const vec of [undefined, false] as const) {
     });
   });
 }
+
+// Checked against labelled queries on the owner's brain on 2026-09-15: halving an OR fallback list and cutting
+// candidates to 20 did not clear the bar on held-out queries, so fusion stays as below.
+describe("hybrid fusion", () => {
+  test("a keyword list that fell back to OR counts in full", async () => {
+    const embedder = fakeEmbedder();
+    const { idx } = await makeIndex({ embeddings: true, embedder });
+    const orchard = note({ slug: "orchard", title: "Apples", body: "apples kiwis kiwis apples" });
+    const mango = note({ slug: "mango", title: "Mango", body: "mangoes" });
+    await idx.upsertNote(orchard);
+    await idx.upsertNote(mango);
+    const query = "apples kiwis mangoes";
+
+    // No note holds all three words, so only the OR step can return both; only "orchard" is a semantic match.
+    expect((await idx.search(query, { mode: "keyword" })).map((r) => r.id)).toEqual(["orchard", "mango"]);
+    expect(await similarity(embedder, query, orchard)).toBeGreaterThanOrEqual(SEMANTIC_FLOOR);
+    expect(await similarity(embedder, query, mango)).toBeLessThan(SEMANTIC_FLOOR);
+
+    const hits = await idx.search(query, { mode: "hybrid" });
+    expect(hits.map((r) => r.id)).toEqual(["orchard", "mango"]);
+    // Each list adds 1/(60 + rank): orchard is first in both, mango second in the OR list.
+    expect(hits[0]!.score).toBeCloseTo(1 / 61 + 1 / 61, 10);
+    expect(hits[1]!.score).toBeCloseTo(1 / 62, 10);
+  });
+
+  test("each list brings up to 50 candidates into fusion", async () => {
+    const embedder = fakeEmbedder();
+    const { idx } = await makeIndex({ embeddings: true, embedder });
+    await idx.upsertNote(note({ slug: "zebra-den", title: "Zebra", body: "zebra zebra" }));
+    for (let i = 0; i < 60; i++) {
+      await idx.upsertNote(note({ slug: `zebra-${i}`, title: `Sighting ${i}`, body: "zebra stripes savanna herd grass water dust heat shade trees" }));
+    }
+    expect((await idx.search("zebra", { mode: "semantic", limit: 100 })).map((r) => r.id)).toEqual(["zebra-den"]);
+
+    // 61 notes hold the word; the keyword list stops at 50, and the one semantic match is already among them.
+    const hits = await idx.search("zebra", { mode: "hybrid", limit: 100 });
+    expect(hits).toHaveLength(50);
+    expect(hits[0]).toMatchObject({ id: "zebra-den", score: expect.closeTo(2 / 61, 10) });
+  });
+});
 
 test("semantic and hybrid degrade to keyword when the model is unavailable", async () => {
   const failing: Embedder = { model: "broken", dims: 8, embed: async () => null };

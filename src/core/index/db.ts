@@ -39,6 +39,25 @@ export interface OpenDbOptions {
   /** Try to load sqlite-vec. Default true. */
   vec?: boolean;
   log?: (msg: string) => void;
+  /**
+   * "wal" (default) lets readers and a writer share the file. "delete" suits a file only one connection uses, such
+   * as a rebuild in progress: its large transaction writes straight into the file, and a closed file has no
+   * companion files to move with it.
+   */
+  journalMode?: "wal" | "delete";
+}
+
+/** The files SQLite may keep next to a database: the rollback journal and the WAL pair. */
+const COMPANION_SUFFIXES = ["-journal", "-wal", "-shm"];
+
+/** Delete a database file and its companion files. Missing files are fine; a file in use throws. */
+export function removeDatabaseFiles(dbPath: string): void {
+  for (const file of [dbPath, ...COMPANION_SUFFIXES.map((s) => dbPath + s)]) fs.rmSync(file, { force: true });
+}
+
+/** True when the database or any companion file exists. */
+export function databaseFilesExist(dbPath: string): boolean {
+  return [dbPath, ...COMPANION_SUFFIXES.map((s) => dbPath + s)].some((file) => fs.existsSync(file));
 }
 
 const TABLES = [
@@ -57,7 +76,7 @@ const TABLES = [
 export function openIndexDb(opts: OpenDbOptions): IndexDb {
   fs.mkdirSync(path.dirname(opts.path), { recursive: true });
   const db = new DatabaseSync(opts.path, { allowExtension: true });
-  db.exec("PRAGMA journal_mode=WAL");
+  db.exec(opts.journalMode === "delete" ? "PRAGMA journal_mode=DELETE" : "PRAGMA journal_mode=WAL");
   db.exec("PRAGMA foreign_keys=OFF");
 
   const log = opts.log ?? (() => {});

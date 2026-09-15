@@ -76,4 +76,4 @@ Wikilinks are `[[slug]]` or `[[slug|label]]`. Slugs are lowercase, `a-z0-9`, hyp
 - Strict on write: missing required fields, unknown tags, bad slugs, and stale mtimes are rejected.
 - Loose on read: anything on disk is indexed, invalid files are reported by `check_links`, never crashed on.
 - Every write is one git commit, message `<tool>: <action> <slug>`.
-- The index is a cache. `npm run reindex` rebuilds it from disk at any time.
+- The index is a cache, rebuilt from disk. While the server runs, rebuild it with `POST /api/reindex`: the new index builds in a side file and swaps in, so search keeps working. With the server stopped, `npm run reindex` does the same; it refuses while another process has the index open.

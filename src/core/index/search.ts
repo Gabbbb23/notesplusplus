@@ -2,26 +2,43 @@
  * Keyword, semantic, and hybrid ranking over the index tables.
  *
  * Keyword: stop words dropped, then FTS5 MATCH with bm25 ranking and snippet()
- * excerpts, over notes and (optionally) files. Semantic: embed the query,
- * nearest chunks (sqlite-vec KNN or in-process cosine) above a similarity floor,
+ * excerpts, over notes and (optionally) files. Semantic: nearest chunks to the
+ * query vector (sqlite-vec KNN or in-process cosine) above a similarity floor,
  * best chunk per note. Hybrid: reciprocal rank fusion of the two lists. Every
  * result set is sorted by descending score.
+ *
+ * Everything here is synchronous and takes an already embedded query, so a caller
+ * can embed first and then run all of a search's SQL without yielding in between.
  */
 
 import type { NoteType, SearchResult } from "../types.ts";
 import { blobToVector, type IndexDb, type Row } from "./db.ts";
-import type { Embedder } from "./embeddings.ts";
 
 export interface SearchFilters {
   tag?: string;
   type?: NoteType;
 }
 
-/** How many candidates each ranked list contributes before fusion or truncation. */
+/**
+ * How many candidates each ranked list contributes before fusion or truncation. On 2026-09-15, 20 candidates moved
+ * hybrid MRR by +0.003 on 30 held-out queries and not at all on 33 development queries, short of the 0.02 required.
+ */
 export const CANDIDATES = 50;
 /** How many chunks the KNN step looks at before aggregating per note. */
 const KNN_CHUNKS = 300;
 export const RRF_K = 60;
+
+/**
+ * bm25 weights, one per FTS5 column in table order (db.ts). FTS5 counts UNINDEXED columns too, so `slug` and
+ * `path` take a placeholder 0 that never applies: an unindexed column never matches.
+ */
+export const NOTE_BM25_WEIGHTS = { slug: 0, title: 4, summary: 3, tags: 2, body: 1 } as const;
+export const FILE_BM25_WEIGHTS = { path: 0, title: 3, text: 1 } as const;
+
+const bm25Args = (weights: Record<string, number>): string =>
+  Object.values(weights)
+    .map((w) => w.toFixed(1))
+    .join(", ");
 
 /**
  * Lowest cosine similarity (0 to 1, normalized bge vectors) a chunk needs to
@@ -182,7 +199,7 @@ function keywordNotes(idx: IndexDb, match: string, filters: SearchFilters, limit
   const rows = idx.db
     .prepare(
       `SELECT n.slug, n.path, n.title, n.type, n.summary, n.tags_json,
-              bm25(notes_fts, 4.0, 3.0, 2.0, 1.0) AS rank,
+              bm25(notes_fts, ${bm25Args(NOTE_BM25_WEIGHTS)}) AS rank,
               snippet(notes_fts, -1, '«', '»', '…', 24) AS snippet
        FROM notes_fts JOIN notes n ON n.id = notes_fts.rowid
        WHERE notes_fts MATCH ?${f.sql}
@@ -195,7 +212,7 @@ function keywordNotes(idx: IndexDb, match: string, filters: SearchFilters, limit
 function keywordFiles(idx: IndexDb, match: string, limit: number): FileHit[] {
   const rows = idx.db
     .prepare(
-      `SELECT f.path, f.title, bm25(files_fts, 3.0, 1.0) AS rank,
+      `SELECT f.path, f.title, bm25(files_fts, ${bm25Args(FILE_BM25_WEIGHTS)}) AS rank,
               snippet(files_fts, -1, '«', '»', '…', 24) AS snippet
        FROM files_fts JOIN files f ON f.id = files_fts.rowid
        WHERE files_fts MATCH ?
@@ -282,21 +299,10 @@ function nearestChunks(idx: IndexDb, vector: Float32Array, k: number): Array<{ i
 }
 
 /**
- * Semantic search: best chunk per note, filtered, top `limit`. Chunks below
+ * Semantic search for an embedded query: best chunk per note, filtered, top `limit`. Chunks below
  * SEMANTIC_FLOOR are ignored, so a query with no close match returns [].
- * Null when the embedder is unavailable.
  */
-export async function semanticSearch(
-  idx: IndexDb,
-  embedder: Embedder,
-  query: string,
-  filters: SearchFilters,
-  limit: number,
-): Promise<SearchResult[] | null> {
-  const vectors = await embedder.embed([query]);
-  const qv = vectors?.[0];
-  if (!qv) return null;
-
+export function semanticSearch(idx: IndexDb, qv: Float32Array, filters: SearchFilters, limit: number): SearchResult[] {
   const nearest = nearestChunks(idx, qv, KNN_CHUNKS).filter((c) => c.similarity >= SEMANTIC_FLOOR);
   if (nearest.length === 0) return [];
 
@@ -324,18 +330,25 @@ export async function semanticSearch(
   return hits.slice(0, limit);
 }
 
-/** Hybrid: reciprocal rank fusion of the keyword and semantic lists. */
-export async function hybridSearch(
+/**
+ * Hybrid: reciprocal rank fusion of the keyword and semantic lists, each list counting in full, including a
+ * keyword list that fell back to OR. `qv` is the embedded query, or null when the model is unavailable, which
+ * leaves the keyword list alone.
+ *
+ * Counting an OR fallback at half weight was checked on 2026-09-15 and not adopted: it lowered hybrid MRR by 0.019
+ * on 30 held-out queries and left 33 development queries unchanged.
+ */
+export function hybridSearch(
   idx: IndexDb,
-  embedder: Embedder,
+  qv: Float32Array | null,
   query: string,
   filters: SearchFilters,
   includeFiles: boolean,
   limit: number,
-): Promise<SearchResult[]> {
+): SearchResult[] {
   const keyword = keywordSearch(idx, query, filters, includeFiles, CANDIDATES);
-  const semantic = await semanticSearch(idx, embedder, query, filters, CANDIDATES);
-  if (!semantic || semantic.length === 0) return keyword.slice(0, limit);
+  const semantic = qv ? semanticSearch(idx, qv, filters, CANDIDATES) : [];
+  if (semantic.length === 0) return keyword.slice(0, limit);
 
   const key = (r: SearchResult) => `${r.kind}:${r.id}`;
   const fused = reciprocalRankFusion([keyword.map(key), semantic.map(key)]);
