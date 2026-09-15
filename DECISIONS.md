@@ -83,3 +83,24 @@ Because: One user on one laptop does not justify more.
 ## 2026-09-13 — Google integrations deferred to phase two
 Decision: No Google work in v1. Phase two starts with the agent creating Calendar reminders derived from notes.
 Because: OAuth and API work do not touch the store design and are better scoped once the store is in daily use.
+
+## 2026-09-14 — Web UI moves to React, Vite, Tailwind, and shadcn
+Decision: The web UI is a React single-page app built with Vite, styled with Tailwind and shadcn components, served as static files by the same Node process. A build step is accepted. Light theme only, using Google's white and grey surfaces.
+Because: The owner wants real shadcn components and a comfortable light theme, and accepts a build step for it.
+Supersedes: 2026-09-13 — Web UI is read-only in v1 (the "server-rendered, no build step" part; read-only plus inbox drop box still holds).
+
+## 2026-09-14 — Fields is the first project in the brain
+Decision: The Fields Group project gets its own `fields` tag and `fields` hub. The 44 documents under C:\Projects\fields\Documents are copied into the brain's files folder and get one note each with key facts, plus notes on the fields-api and fields-fe repo architecture taken from their AGENTS.md and README. Source code is not described.
+Because: Fields is the owner's main work; the goal is finding specific facts inside the documents. Repo docs give architecture context without the bulk of source.
+
+## 2026-09-14 — Index extracts PowerPoint and Excel text
+Decision: The indexer extracts text from .pptx, .xlsx, and .xlsm in addition to PDF, Word, and plain text.
+Because: The Fields documents include decks and workbooks that must be searchable by content.
+
+## 2026-09-14 — Tables never scroll sideways
+Decision: No table in the web UI scrolls horizontally at any width, on list pages or inside note bodies. Long values wrap at natural break points. When a table's columns cannot fit, it switches to a stacked layout where each row becomes a block of label and value pairs.
+Because: The owner does not want to scroll sideways to read a table.
+
+## 2026-09-14 — One shared component per UI pattern
+Decision: Tables, badges, cards, page headers, and long-text wrapping each live in one shared component under web/src/components. Pages compose them and never restyle these patterns locally. An architecture test fails when a page reaches past the shared component to the underlying shadcn primitive or hard-codes colours.
+Because: A design change should reach every page that uses the pattern from a single edit.

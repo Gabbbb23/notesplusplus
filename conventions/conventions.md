@@ -7,7 +7,7 @@ The brain is the owner's second brain: a folder of markdown notes that you, the 
 ```
 notes/<slug>.md      type: note | hub. notes/index.md is the root hub.
 sources/<slug>.md    type: source. Raw material kept verbatim under a frontmatter header.
-files/**             attachments (pdf, docx, images). Referenced from notes via `files:`.
+files/**             attachments (pdf, docx, pptx, xlsx, images). Referenced from notes via `files:`.
 inbox/**             material the owner dropped for you. Empty it with the `file` prompt.
 tags.yml             the tag registry. Every tag a note uses must be listed here.
 ```
@@ -68,6 +68,7 @@ Tags are few and broad: `hardware`, `health`, `work`, `recipes`. They group whol
 - Keep it self-contained. A reader who lands on it from search must not need another note to understand it.
 - Name specific things: dates, numbers, names, versions, prices, file names. "Upgraded to Node 24 on 2026-09-01" beats "recently upgraded Node".
 - Several small notes beat one long one. Search returns notes; a long note buries the fact in the snippet.
+- In tables, give every column a unique header that names its unit: "Pilot US$/month", not a second "Pilot". On narrow screens the web view shows each row as label and value pairs, and repeated headers make the labels ambiguous.
 - End with a `## Related` section holding wikilinks to neighbouring notes and to the source.
 
 Example body:
