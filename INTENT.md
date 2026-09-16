@@ -14,6 +14,8 @@ One person, the owner, on one Windows laptop. No accounts, no sharing, no hostin
 
 Phase one shipped on 2026-09-14: store, index, REST API, MCP server, web view. Focus now is daily use with two domains in the brain, the Fields Group project and the owner's BSIT college subjects, and a web UI (React, Tailwind, shadcn, light Google-white theme) that makes notes easy to read, navigate, and search.
 
+Beside the inbox there is a second way material arrives: folders outside the brain that already hold it, named in `TRACKED_PATHS`. Nothing watches them. `npm run unfiled` compares them against the brain on demand and lists the documents no note records, so the owner can say "I added a file" and the agent finds which one.
+
 Phase one scope, for reference:
 
 - Markdown files as the only source of truth, in a separate git repo (default `C:\Users\Joeven Jagocoy\brain`).
@@ -35,7 +37,7 @@ Done when: the owner can drop a transcript in the inbox, tell Claude Code to fil
 - TypeScript on Node. One process serves REST, index, and the built UI. The MCP server is a second stdio process that calls REST.
 - The web UI is a separate package in `web/` with its own build; the server only serves its output.
 - No feature may require the laptop to be online.
-- Two settings only: notes repo path and port.
+- Three settings: notes repo path, port, and the tracked folders.
 
 ## Later phases
 

@@ -25,6 +25,15 @@ Use this when the owner hands you raw material in conversation or says "process 
 
 8. **Report** to the owner in a few lines: which sources were taken, which notes were created, which were updated, and anything you could not place or found contradictory. Include slugs so the owner can look.
 
+## A file the owner added to a tracked folder
+
+When the owner says they added a file, or asks what has not been filed yet, run `npm run unfiled` in the app repo. It lists the documents in their tracked folders that no note records, newest first, so the file they mean is usually the first line (`-- --all` includes images and video, `-- --limit 0` drops the cut-off). Read it with `npx tsx src/cli/extract.ts "<path>"`; if nothing comes out, say the file is image-only rather than guessing at its contents. Then file it through the procedure above, and record the file itself in one of these two ways, or the next scan lists it again:
+
+- **Mention it.** Write its full path as inline code in the note that covers it. This is enough on its own, and it gives the owner Open and Show in folder buttons on that note.
+- **Copy it in.** Put a copy under `files/`, in the folder the brain already uses for that domain, and list the copy in the note's `files:`. Do this when the file should live inside the brain's history; a mention leaves it where it is.
+
+Naming the file in prose does not record it. `Short Reflection Vinculado.pdf` in a sentence says nothing about which file on disk it is.
+
 ## Video and audio transcripts
 
 Extract claims and facts. Drop filler, greetings, sponsor reads, and repeated points. Keep who said what when the speaker matters ("Dr. Cruz says shift workers should keep a fixed wake time"); drop attribution when it is the presenter restating common knowledge. Keep timestamps only if the source has them and a reader would use them to jump back to the video; write them as `[12:34]` after the claim. A one-hour transcript usually yields three to eight notes, not one.

@@ -20,17 +20,18 @@ One Node process serves everything. TypeScript, run with `tsx`. The web UI in `w
 
 ```
 src/
-  config.ts          BRAIN_PATH, PORT, CACHE_PATH
+  config.ts          BRAIN_PATH, PORT, CACHE_PATH, TRACKED_PATHS
   core/
     types.ts         shared contracts: NoteStore, SearchIndex, Brain, errors. Every module builds against this.
     store/           NoteStore: files on disk, frontmatter, slugs, wikilinks, tags.yml, inbox, git auto-commit
     index/           SearchIndex: SQLite (node:sqlite) with FTS5, local embeddings, links table, file text extraction
     brain.ts         Brain facade composing store + index
+    tracked.ts       which documents in the owner's folders outside the brain no note records yet
   api/               Hono REST routes over Brain. JSON in, JSON out. Also serves files for viewing and opens
                      them in their default app or File Explorer (local-paths.ts holds the rules, launcher.ts the launch),
                      and exports notes as markdown or PDF (pdf-export.ts prints the web print page with headless Edge).
   mcp/               MCP stdio server. Thin HTTP client of the REST API. Serves conventions + prompts.
-  cli/               init-brain, reindex
+  cli/               init-brain, reindex, extract (a document's text), unfiled (tracked folders vs the brain)
   app.ts             the HTTP app: api + static web UI from web/dist (SPA fallback for non-/api routes)
   server.ts          entry: opens the brain and serves app.ts on 127.0.0.1 and ::1
   mcp.ts             entry: mcp stdio
@@ -73,6 +74,19 @@ files: [files/laptop-invoice.pdf]   # optional, brain-relative paths
 ```
 
 Wikilinks are `[[slug]]` or `[[slug|label]]`. Slugs are lowercase, `a-z0-9`, hyphen-separated, unique across notes/ and sources/.
+
+## Tracked folders
+
+`TRACKED_PATHS` names the owner's folders outside the brain that hold raw material (course folders, job folders), separated by `;`. Nothing watches them. `npm run unfiled` walks them on demand and lists the documents no note records, newest first:
+
+```
+npm run unfiled                      # documents under TRACKED_PATHS, newest 30
+npm run unfiled -- --all             # every extension, screenshots and video included
+npm run unfiled -- --limit 0         # no cut-off
+npm run unfiled -- --root "C:\..."   # this folder instead of TRACKED_PATHS
+```
+
+A file counts as recorded when a note mentions its full path, or an attachment under `files/` has the same name and byte size. A filename written in prose is not enough, so the list can name a file the owner considers filed; it never leaves out a file nothing in the brain records. `src/core/tracked.ts` holds both rules and what the walk skips.
 
 ## Conventions the code enforces
 
