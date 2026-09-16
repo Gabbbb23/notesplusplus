@@ -16,7 +16,8 @@
     "build:web": "npm --prefix web run build",
     "dev:web": "npm --prefix web run dev",
     "test:web": "npm --prefix web test",
-    "extract": "tsx src/cli/extract.ts"
+    "extract": "tsx src/cli/extract.ts",
+    "unfiled": "tsx src/cli/unfiled.ts"
   },
   "engines": {
     "node": ">=24"
