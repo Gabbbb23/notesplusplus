@@ -16,7 +16,7 @@ A request that does not fit its schema gets one 400 `validation` message listing
 
 | Method | Path | Body | Response |
 |---|---|---|---|
-| GET | `/api/notes?tag=&type=&limit=&offset=` | | `NotePage`: `{ items: NoteSummary[], total, limit, offset }`, see [Note lists](#note-lists). |
+| GET | `/api/notes?tag=&type=&sort=&limit=&offset=` | | `NotePage`: `{ items: NoteSummary[], total, limit, offset }`, see [Note lists](#note-lists). |
 | POST | `/api/notes` | `WriteNoteInput` | `Note` (201). Slug derived from title if absent. See [Frontmatter validation](#frontmatter-validation). |
 | GET | `/api/notes/:slug` | | `Note`, with `links` and `mentions`, see [Links and mentions](#links-and-mentions). |
 | PUT | `/api/notes/:slug` | `{ frontmatter, body, expectedMtimeMs? }` | `Note`. Create or replace at this slug, which must match the slug pattern. A `slug` in the body is ignored. |
@@ -74,6 +74,7 @@ The web UI lives on the same server under `/` (not `/api`).
 
 - `limit` is an integer from 1 to 500, default 100 (`NOTE_LIST_LIMIT`). `offset` is an integer of 0 or more, default 0 (`OFFSET`). An empty value takes the default. Anything else, such as `limit=0`, `limit=501`, `offset=-1`, or `limit=abc`, gets 400 `validation`, one message naming each bad parameter. `type` must be note, hub, or source; an empty `tag` or `type` is ignored.
 - `items` are sorted by title, then by slug when titles are equal, so walking `offset` forward by `limit` visits every note once.
+- `sort` changes that order: `title` (the default), or `created` or `updated` for newest first. A date is a day, so notes sharing one fall back to title then slug, and paging stays stable. Anything else gets 400 `validation` (`sort must be one of title, created, updated`). Sorting happens before paging. Home's Recent section asks for `sort=created`.
 - `total` counts every note matching `tag` and `type`, not only the ones on this page. `limit` and `offset` echo what was used.
 - An `offset` at or past the end gets `"items": []` with the real `total`.
 - Invalid files are left out of `items` and `total`; `/api/check-links` reports them.

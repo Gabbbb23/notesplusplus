@@ -294,6 +294,60 @@ describe("notes", () => {
   });
 });
 
+describe("note list order", () => {
+  /** The fixtures written below, dated well away from today so the seeded notes never mix into their order. */
+  const FIXTURES = ["order-middle", "order-newer-a", "order-newer-z", "order-oldest"];
+
+  sharedBrain(async (t) => {
+    const fixture = (slug: string, title: string, created: string, updated: string) => ({
+      slug,
+      frontmatter: { title, type: "note" as const, summary: "s", tags: [], created, updated },
+      body: "Body.",
+    });
+    await t.writeNotes([
+      fixture("order-oldest", "Order oldest", "2025-01-05", "2025-06-01"),
+      fixture("order-middle", "Order middle", "2025-02-10", "2025-02-10"),
+      fixture("order-newer-a", "Order newer A", "2025-03-01", "2025-03-05"),
+      fixture("order-newer-z", "Order newer Z", "2025-03-01", "2025-03-02"),
+    ]);
+  });
+
+  /** The fixtures' slugs in the order the endpoint returned them, with the seeded notes left out. */
+  async function order(query: string): Promise<string[]> {
+    const page = (await (await app.request(`/api/notes${query}`)).json()) as NotePage;
+    return page.items.map((n) => n.slug).filter((slug) => FIXTURES.includes(slug));
+  }
+
+  it("sorts by title when no sort is asked for", async () => {
+    expect(await order("")).toEqual(["order-middle", "order-newer-a", "order-newer-z", "order-oldest"]);
+  });
+
+  it("sort=created puts the newest day first and breaks a shared day by title", async () => {
+    expect(await order("?sort=created")).toEqual(["order-newer-a", "order-newer-z", "order-middle", "order-oldest"]);
+  });
+
+  it("sort=updated orders by the updated date instead", async () => {
+    expect(await order("?sort=updated")).toEqual(["order-oldest", "order-newer-a", "order-newer-z", "order-middle"]);
+  });
+
+  it("sorts before paging, so two pages of the newest never repeat a note", async () => {
+    const first = (await (await app.request("/api/notes?sort=created&limit=2")).json()) as NotePage;
+    const second = (await (await app.request("/api/notes?sort=created&limit=2&offset=2")).json()) as NotePage;
+    const slugs = [...first.items, ...second.items].map((n) => n.slug);
+    expect(first.items).toHaveLength(2);
+    expect(new Set(slugs).size).toBe(slugs.length);
+    expect(first.total).toBe(second.total);
+  });
+
+  it("refuses a sort it does not have with 400", async () => {
+    const res = await app.request("/api/notes?sort=oldest");
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: { code: "validation", message: "sort must be one of title, created, updated" },
+    });
+  });
+});
+
 describe("note writes", () => {
   freshBrainPerTest();
 

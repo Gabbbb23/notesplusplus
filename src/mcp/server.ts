@@ -102,7 +102,7 @@ export function createMcpServer(client: BrainClient, opts: McpServerOptions): Mc
     {
       title: "List notes",
       description:
-        `List notes with slug, title, and summary, sorted by title, optionally filtered by tag or type. Returns ${LIST_NOTES_DEFAULT_LIMIT} notes per page by default; when more remain, the last line gives the offset for the next page. Use it to see a whole domain or all hubs; use search when you are looking for a specific fact.`,
+        `List notes with slug, title, and summary, sorted by title, optionally filtered by tag or type. Pass sort=created or sort=updated for newest first, to see what was filed or changed lately. Returns ${LIST_NOTES_DEFAULT_LIMIT} notes per page by default; when more remain, the last line gives the offset for the next page. Use it to see a whole domain or all hubs; use search when you are looking for a specific fact.`,
       inputSchema: {
         ...listNotesInput,
         limit: listNotesInput.limit.describe(`Notes per page, 1 to ${NOTE_LIST_LIMIT.max}. Default ${LIST_NOTES_DEFAULT_LIMIT}.`),

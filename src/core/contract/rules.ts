@@ -14,6 +14,14 @@ export const noteTypeSchema = z.enum(NOTE_TYPES);
 export const SEARCH_MODES = ["hybrid", "keyword", "semantic"] as const;
 export const searchModeSchema = z.enum(SEARCH_MODES);
 
+/**
+ * How a note list is ordered. `title` is A to Z, the order every list has had; `created` and `updated` are
+ * newest first, because the only reason to order a list by a date is to see the latest. Dates are days, so the
+ * notes written on one day tie and fall back to title.
+ */
+export const NOTE_SORTS = ["title", "created", "updated"] as const;
+export const noteSortSchema = z.enum(NOTE_SORTS);
+
 /** Where a pin shows: on Home or in the sidebar. Each is its own ordered list in pins.yml. */
 export const PIN_TARGETS = ["home", "sidebar"] as const;
 export const pinTargetSchema = z.enum(PIN_TARGETS, { error: `target must be one of ${PIN_TARGETS.join(", ")}` });

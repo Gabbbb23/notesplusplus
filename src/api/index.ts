@@ -23,6 +23,7 @@ import {
   ForbiddenError,
   NotFoundError,
   ValidationError,
+  sortSummaries,
   type Brain,
   type NotePage,
   type NoteSummary,
@@ -184,9 +185,9 @@ export function createApi(brain: Brain, opts: ApiOptions): Hono {
   // ---- notes ----
 
   app.get("/api/notes", async (c) => {
-    const { tag, type, limit, offset } = parseQuery(c, noteListQuerySchema);
-    // The store still reads every note; paging trims the response, not the scan.
-    const notes = await brain.list({ tag, type });
+    const { tag, type, sort, limit, offset } = parseQuery(c, noteListQuerySchema);
+    // The store still reads every note; sorting and paging trim the response, not the scan.
+    const notes = sortSummaries(await brain.list({ tag, type }), sort);
     const page: NotePage = { items: notes.slice(offset, offset + limit), total: notes.length, limit, offset };
     return c.json(page);
   });

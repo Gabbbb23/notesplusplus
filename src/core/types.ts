@@ -21,6 +21,7 @@ import type { z } from "zod";
 import type * as contract from "./contract/index.ts";
 
 export type NoteType = z.infer<typeof contract.noteTypeSchema>;
+export type NoteSort = z.infer<typeof contract.noteSortSchema>;
 export type SearchMode = z.infer<typeof contract.searchModeSchema>;
 export type PinTarget = z.infer<typeof contract.pinTargetSchema>;
 
@@ -66,6 +67,19 @@ export interface WriteMeta {
 /** The order of every note list: by title, then by slug when titles are equal, so pages never overlap or skip. */
 export function compareSummaries(a: Pick<NoteSummary, "title" | "slug">, b: Pick<NoteSummary, "title" | "slug">): number {
   return a.title.localeCompare(b.title) || a.slug.localeCompare(b.slug);
+}
+
+/**
+ * A copy of `items` in the order a caller asked for: A to Z by title, or newest first by `created` or `updated`.
+ * ISO dates sort as text, and a date is a day, so every note written on one day ties and falls back to
+ * compareSummaries. Paging is applied after this, so a page never overlaps or skips.
+ */
+export function sortSummaries<T extends Pick<NoteSummary, "title" | "slug" | "created" | "updated">>(
+  items: readonly T[],
+  sort: NoteSort = "title",
+): T[] {
+  if (sort === "title") return [...items].sort(compareSummaries);
+  return [...items].sort((a, b) => b[sort].localeCompare(a[sort]) || compareSummaries(a, b));
 }
 
 /**

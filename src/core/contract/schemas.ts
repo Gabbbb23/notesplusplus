@@ -9,11 +9,13 @@
 import { z } from "zod";
 import {
   NOTE_LIST_LIMIT,
+  NOTE_SORTS,
   NOTE_TYPES,
   OFFSET,
   SEARCH_LIMIT,
   SEARCH_MODES,
   noteListLimitSchema,
+  noteSortSchema,
   noteTypeSchema,
   offsetSchema,
   pinTargetSchema,
@@ -123,14 +125,16 @@ export const listFilterSchema = z.object({ tag: tagFilter, type: typeFilter });
 
 /** One page of the note list, as a caller asks for it. Omitted limit and offset take the defaults. */
 export const noteListOptionsSchema = listFilterSchema.extend({
+  sort: noteSortSchema.optional().describe("title (default, A to Z), or created or updated, newest first."),
   limit: noteListLimitSchema.optional(),
   offset: offsetSchema.optional().describe("How many notes to skip, for the next page. Default 0."),
 });
 
-/** `GET /api/notes?tag=&type=&limit=&offset=`. */
+/** `GET /api/notes?tag=&type=&sort=&limit=&offset=`. */
 export const noteListQuerySchema = z.object({
   tag: queryText,
   type: queryEnum("type", NOTE_TYPES),
+  sort: queryEnum("sort", NOTE_SORTS),
   limit: queryInteger(noteListLimitSchema, NOTE_LIST_LIMIT),
   offset: queryInteger(offsetSchema, OFFSET),
 });
