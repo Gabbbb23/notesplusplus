@@ -8,6 +8,7 @@ import type {
   LinkReport,
   Note,
   NoteListPage,
+  NoteSort,
   NoteSummary,
   NoteTrail,
   NoteType,
@@ -120,8 +121,10 @@ export function printNoteUrl(slug: string, { autoprint = false }: { autoprint?: 
 }
 
 export const api = {
-  /** One page of notes by title. The server's default limit is 100, its maximum 500. */
-  listNotes(filter: { tag?: string; type?: NoteType; limit?: number; offset?: number } = {}): Promise<NoteListPage> {
+  /** One page of notes, by title unless `sort` asks for newest first. The server's default limit is 100, its maximum 500. */
+  listNotes(
+    filter: { tag?: string; type?: NoteType; sort?: NoteSort; limit?: number; offset?: number } = {},
+  ): Promise<NoteListPage> {
     return request<NoteListPage>(`/api/notes${query(filter)}`);
   },
 

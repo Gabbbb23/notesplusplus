@@ -212,6 +212,7 @@ describe("other pages", () => {
     stubApi({
       "/api/notes/index": () => reply(200, note("index", "Index", [], "hub")),
       "/api/stats": () => reply(200, { notes: 1, files: 0, invalid: 0 }),
+      "/api/notes?sort=created&limit=50": () => reply(200, { items: [], total: 0, limit: 50, offset: 0 }),
     });
     renderAt("/");
 

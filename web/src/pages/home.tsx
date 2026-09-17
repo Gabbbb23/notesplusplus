@@ -8,6 +8,7 @@ import { Notice } from "@/components/notice";
 import { PageHeader } from "@/components/page-header";
 import { ErrorAlert, LoadingBlock } from "@/components/page-state";
 import { usePins } from "@/components/pins";
+import { RecentNotes } from "@/components/recent-notes";
 import { SectionHeading } from "@/components/section-heading";
 import { TextLink } from "@/components/text-link";
 import { api, ApiError, noteUrl, type Stats } from "@/lib/api";
@@ -56,8 +57,9 @@ function PinnedNotes() {
 
 /**
  * The header comes first, as on every other page, and shows even when the hub fails to load:
- * the root hub's title and summary once loaded, "Home" until then or without one. The pinned
- * notes follow it, above the stats and the hub's content.
+ * the root hub's title and summary once loaded, "Home" until then or without one. Then the pinned
+ * notes, the stats, what was filed recently, and the hub's content, so the shortest routes to a
+ * note sit above the map of the whole brain.
  */
 export function HomePage() {
   const hub = useAsync(() => api.getNote("index"), []);
@@ -81,6 +83,7 @@ export function HomePage() {
       </PageHeader>
       <PinnedNotes />
       <StatsStrip stats={stats} />
+      <RecentNotes />
       {hub.loading && <LoadingBlock lines={8} />}
       {missing && (
         <Notice tone="info" title="No root hub yet">

@@ -3,6 +3,9 @@
 
 export type NoteType = "note" | "hub" | "source";
 
+/** How GET /api/notes orders a page: A to Z by title, or newest first by created or updated. */
+export type NoteSort = "title" | "created" | "updated";
+
 /** ISO date, YYYY-MM-DD. */
 export type IsoDate = string;
 
@@ -80,7 +83,7 @@ export interface TagWithCount extends Tag {
   count: number;
 }
 
-/** One page of GET /api/notes, ordered by title. */
+/** One page of GET /api/notes, ordered by the requested sort (title by default). */
 export interface NoteListPage {
   items: NoteSummary[];
   /** Notes matching the filter across all pages. */

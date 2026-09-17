@@ -104,7 +104,7 @@ Every card, all on one shell (16px padding, 8px radius, hairline border). It is 
 
 `note-card.tsx` and `search-results.tsx` are built on `ItemCard`:
 
-- `NoteCard` (`note`, `actions`) shows a note's title, type, summary, tags, and updated date. With `compact`, it shows the title and type only and takes a `NoteRef` (slug, title, type); Home's Pinned section uses it.
+- `NoteCard` (`note`, `actions`) shows a note's title, type, summary, tags, and updated date. With `compact`, it shows the title and type only and takes a `NoteRef` (slug, title, type); Home's Pinned and Recent sections use it.
 - `NoteList` gives every card its `NoteActionsMenu`. The Tag page and a note's Backlinks use it.
 - `SearchResultCard` gives a note result its `NoteActionsMenu` and a file result none. `SearchResults` opens with a count line: "20 results for “ryzen”", or "More than 20 results for “ryzen”" when its `hasMore` is set.
 
@@ -122,6 +122,15 @@ Where it is used:
 - **Tag page** loads 50 notes at a time through `offset` with `lib/use-paged-list.ts`. The header count comes from the response's `total` ("93 notes"), and "Show more notes" carries "Showing 50 of 93" until every note is loaded.
 
 The Tags page needs neither: `GET /api/tags` carries each tag's count, so it is one request.
+
+## recent-notes.tsx
+
+`RecentNotes` is Home's "Recent" section: what was filed lately, so the newest note is one click from Home instead of a search away. Home is its only caller.
+
+- It asks for `GET /api/notes?sort=created&limit=50` once, groups those notes by their `created` date, and shows each day under an `h3` of the date plus a muted detail line ("today · 3 notes", "yesterday · 1 note", "2 notes" on older days). Rows are compact `NoteCard`s with their `NoteActionsMenu`, so a new note can be pinned or exported from Home.
+- It orders by `created`, not `updated`: the section answers "what is new", and a note edited today does not come back to the top.
+- Eight notes show at first; `ShowMore` reveals eight more from the batch already fetched, so no request follows a click. Once the batch is fully shown and the brain holds more, `ShowMoreLimit` names the cap ("Showing the newest 50 notes of 191.").
+- A failed load shows an `ErrorAlert` with Try again, which re-runs only this request. An empty brain renders nothing at all, so a new brain shows just the root hub notice.
 
 ## meta.tsx
 
@@ -235,12 +244,12 @@ Outside a `PinsProvider`, `usePins` throws.
 
 Where pins show:
 
-- **Home.** A "Pinned" section under the header, above the stats and the root hub's content: a `SectionHeading` and compact `NoteCard`s in pin order. Each card's menu adds Move up and Move down. With no Home pins the section does not render.
+- **Home.** A "Pinned" section under the header, above the stats, the Recent section, and the root hub's content: a `SectionHeading` and compact `NoteCard`s in pin order. Each card's menu adds Move up and Move down. With no Home pins the section does not render.
 - **Sidebar.** A "Pinned" group under the page links (a `nav` named "Pinned"), in the desktop sidebar and the mobile Sheet alike. Each row is a link with a type icon (note, hub, source) and the title, cut at two lines with an ellipsis (`line-clamp-2`); the full title stays the link's accessible name and its tooltip. The current note's link gets the page links' active colours from the same `navStateClass`. Each row has a small `NoteActionsMenu` at its right, shown on hover, while the row holds focus, while its menu is open, and always on devices without hover; that menu is where a sidebar pin is moved or unpinned. With no sidebar pins the group does not render. The sidebar's link area scrolls up and down when the pins outgrow the screen, never sideways.
 
 ## note-actions-menu.tsx
 
-`NoteActionsMenu` (`note`, `pinnedList`, `onRemovedFromList`, `size`) is the three-dot menu for one note. It is the only importer of `ui/dropdown-menu`. The note page header, every note card (search results, the Tag page, Backlinks, Home's Pinned section), and each sidebar pin use it.
+`NoteActionsMenu` (`note`, `pinnedList`, `onRemovedFromList`, `size`) is the three-dot menu for one note. It is the only importer of `ui/dropdown-menu`. The note page header, every note card (search results, the Tag page, Backlinks, Home's Pinned and Recent sections), and each sidebar pin use it.
 
 - **Trigger.** A ghost icon button with `EllipsisVertical`, named "More actions for <title>". `size="default"` is 32px, for cards and headers; `size="small"` is 24px, for a sidebar row.
 - **Items.** "Pin to Home" and "Pin to sidebar" are checkbox items, checked while pinned. With `pinnedList`, a separator and "Move up" and "Move down" follow, the first disabled for the top pin and the second for the bottom one. After another separator comes "Export as".

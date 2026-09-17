@@ -73,6 +73,7 @@ const ROUTES: Record<string, Route> = {
   "/api/tags": () => reply(200, [{ name: "college", description: "BSIT degree", count: 1 }]),
   "/api/search?q=rizal&limit=20&mode=hybrid": () => reply(200, { results: [], hasMore: false }),
   "/api/notes?tag=college&limit=50&offset=0": () => reply(200, { items: [], total: 0, limit: 50, offset: 0 }),
+  "/api/notes?sort=created&limit=50": () => reply(200, { items: [], total: 0, limit: 50, offset: 0 }),
   "/api/files": () => reply(200, []),
   "/api/inbox": () => reply(200, []),
   "/api/check-links": () => reply(200, { brokenLinks: [], missingFiles: [], missingSources: [], invalidNotes: [], notesWithoutHub: [], notesInSeveralHubs: [], missingPins: [] }),
