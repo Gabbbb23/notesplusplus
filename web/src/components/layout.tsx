@@ -9,6 +9,7 @@ import {
   ScrollTextIcon,
   SearchIcon,
   TagIcon,
+  BookmarkIcon,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useId, useState, type FormEvent } from "react";
@@ -34,6 +35,7 @@ const NAV: NavItem[] = [
   { to: "/", label: "Home", icon: HomeIcon },
   { to: "/search", label: "Search", icon: SearchIcon },
   { to: "/tags", label: "Tags", icon: TagIcon },
+  { to: "/bookmarks", label: "Bookmarks", icon: BookmarkIcon },
   { to: "/inbox", label: "Inbox", icon: InboxIcon },
   { to: "/files", label: "Files", icon: FolderIcon },
   { to: "/check", label: "Check", icon: CheckCircle2Icon },

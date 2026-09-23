@@ -49,6 +49,9 @@ export interface PinnedNotes {
   sidebar: NoteSummary[];
 }
 
+export interface BookmarkGroup { name: string; slugs: string[]; }
+export interface BookmarkLists { groups: BookmarkGroup[]; }
+
 export interface Note extends NoteSummary {
   frontmatter: Frontmatter;
   /** Markdown body without the frontmatter block. */

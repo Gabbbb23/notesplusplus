@@ -1,10 +1,11 @@
 import type { ReactNode } from "react";
 import { KindBadge, TagBadges } from "@/components/badges";
-import { CardList, ItemCard } from "@/components/item-card";
+import { ItemCard } from "@/components/item-card";
 import { NoteActionsMenu } from "@/components/note-actions-menu";
 import { EmptyState } from "@/components/page-state";
 import { noteUrl } from "@/lib/api";
 import type { NoteRef, NoteSummary } from "@/lib/types";
+import type { NoteView } from "@/components/view-switch";
 
 export type NoteCardProps =
   | {
@@ -46,13 +47,13 @@ export function NoteCard(props: NoteCardProps) {
 }
 
 /** Notes as cards, each with its NoteActionsMenu: the Tag page and a note's Backlinks. */
-export function NoteList({ notes, empty = "Nothing here yet." }: { notes: NoteSummary[]; empty?: string }) {
+export function NoteList({ notes, empty = "Nothing here yet.", view = "list" }: { notes: NoteSummary[]; empty?: string; view?: NoteView }) {
   if (notes.length === 0) return <EmptyState>{empty}</EmptyState>;
   return (
-    <CardList>
+    <div className={view === "tiles" ? "grid gap-3 sm:grid-cols-2" : "space-y-3"} data-view={view}>
       {notes.map((n) => (
-        <NoteCard key={n.slug} note={n} actions={<NoteActionsMenu note={n} />} />
+        <NoteCard key={n.slug} note={n} compact={view === "tiles"} actions={<NoteActionsMenu note={n} />} />
       ))}
-    </CardList>
+    </div>
   );
 }

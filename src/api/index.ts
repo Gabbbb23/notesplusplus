@@ -16,6 +16,10 @@ import {
   reorderPinsInputSchema,
   searchQuerySchema,
   setPinInputSchema,
+  bookmarkChangeInputSchema,
+  bookmarkGroupInputSchema,
+  bookmarkGroupOrderInputSchema,
+  bookmarkNoteOrderInputSchema,
   writeNoteInputSchema,
 } from "../core/contract/index.ts";
 import {
@@ -23,6 +27,7 @@ import {
   ForbiddenError,
   NotFoundError,
   ValidationError,
+  filterSummaries,
   sortSummaries,
   type Brain,
   type NotePage,
@@ -101,7 +106,7 @@ const requestGuard: MiddlewareHandler = async (c, next) => {
 /** Requests that launch programs or that the web UI sends to write the brain: POST open and reveal, PUT pins. */
 function needsJsonBody(method: string, path: string): boolean {
   if (method === "POST") return path === "/api/open" || path === "/api/reveal";
-  return method === "PUT" && path.startsWith("/api/pins/");
+  return (method === "PUT" && path.startsWith("/api/pins/")) || (method === "PUT" && path.startsWith("/api/bookmarks")) || (method === "POST" && path === "/api/bookmarks/groups");
 }
 
 /**
@@ -185,9 +190,9 @@ export function createApi(brain: Brain, opts: ApiOptions): Hono {
   // ---- notes ----
 
   app.get("/api/notes", async (c) => {
-    const { tag, type, sort, limit, offset } = parseQuery(c, noteListQuerySchema);
-    // The store still reads every note; sorting and paging trim the response, not the scan.
-    const notes = sortSummaries(await brain.list({ tag, type }), sort);
+    const { tag, type, q, sort, limit, offset } = parseQuery(c, noteListQuerySchema);
+    // The store still reads every note; the text filter, sorting, and paging trim the response, not the scan.
+    const notes = sortSummaries(filterSummaries(await brain.list({ tag, type }), q), sort);
     const page: NotePage = { items: notes.slice(offset, offset + limit), total: notes.length, limit, offset };
     return c.json(page);
   });
@@ -287,6 +292,12 @@ export function createApi(brain: Brain, opts: ApiOptions): Hono {
     const { target, slugs } = await parseBodyAndPath(c, reorderPinsInputSchema, { target: c.req.param("target") });
     return c.json(await brain.reorderPins(target, slugs, metaFrom(c)));
   });
+
+  app.get("/api/bookmarks", async (c) => c.json(await brain.bookmarks()));
+  app.put("/api/bookmarks", async (c) => { const { slug, group, bookmarked } = await parseBody(c, bookmarkChangeInputSchema); return c.json(await brain.setBookmark(slug, group, bookmarked, metaFrom(c))); });
+  app.post("/api/bookmarks/groups", async (c) => { const { name } = await parseBody(c, bookmarkGroupInputSchema); return c.json(await brain.createBookmarkGroup(name, metaFrom(c)), 201); });
+  app.put("/api/bookmarks/order", async (c) => { const { names } = await parseBody(c, bookmarkGroupOrderInputSchema); return c.json(await brain.reorderBookmarkGroups(names, metaFrom(c))); });
+  app.put("/api/bookmarks/:group/order", async (c) => { const { group, slugs } = await parseBodyAndPath(c, bookmarkNoteOrderInputSchema, { group: c.req.param("group") }); return c.json(await brain.reorderBookmarkNotes(group, slugs, metaFrom(c))); });
 
   // ---- inbox ----
 

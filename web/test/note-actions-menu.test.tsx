@@ -3,6 +3,7 @@ import { MemoryRouter } from "react-router";
 import { Toaster } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NoteActionsMenu } from "../src/components/note-actions-menu";
+import { BookmarkAssignment } from "../src/components/bookmarks";
 import { PinsProvider } from "../src/components/pins";
 import { exportPdf, filenameFromContentDisposition } from "../src/lib/export-note";
 import type { PinTarget } from "../src/lib/types";
@@ -88,7 +89,7 @@ describe("<NoteActionsMenu> trigger", () => {
 
     const menu = await openMenu("Enter");
     const items = Array.from(menu.querySelectorAll<HTMLElement>("[role^='menuitem']"));
-    expect(items.map((i) => i.textContent)).toEqual(["Pin to Home", "Pin to sidebar", "Export as"]);
+    expect(items.map((i) => i.textContent)).toEqual(["Pin to Home", "Pin to sidebar", " Bookmark", "Export as"]);
     await waitFor(() => expect(items[0]).toHaveFocus());
     fireEvent.keyDown(items[0]!, { key: "ArrowDown" });
     await waitFor(() => expect(items[1]).toHaveFocus());
@@ -99,6 +100,16 @@ describe("<NoteActionsMenu> trigger", () => {
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
     await openMenu(" ");
     expect(checkbox("Pin to Home")).toBeInTheDocument();
+  });
+});
+
+describe("<BookmarkAssignment>", () => {
+  it("renders the dialog at the document root so the open menu cannot clip it", async () => {
+    stubApi({ "/api/bookmarks": () => reply(200, { groups: [] }) });
+    render(<BookmarkAssignment note={RIZAL} />);
+    fireEvent.click(screen.getByRole("button", { name: "Bookmark" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.parentElement).toBe(document.body);
   });
 });
 

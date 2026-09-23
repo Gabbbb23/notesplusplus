@@ -20,6 +20,7 @@ import {
   type NoteType,
   type PinLists,
   type PinTarget,
+  type BookmarkLists,
   type RenameResult,
   type StoreLinkReport,
   type Tag,
@@ -38,6 +39,7 @@ const TAGS_FILE = "tags.yml";
 const TAGS_HEADER = "# Tag registry. One entry per tag:\n#   - name: hardware\n#     description: Laptops, parts, peripherals.\n";
 const ROOT_HUB_SLUG = "index";
 const PINS_FILE = "pins.yml";
+const BOOKMARKS_FILE = "bookmarks.yml";
 const PINS_HEADER =
   "# The owner's pins on Home and in the sidebar, in order. Set them with set_pin or the web UI; do not edit by hand.\n";
 
@@ -47,6 +49,7 @@ function serializePins(lists: PinLists): string {
 }
 
 const targetProblem = () => `target must be one of ${PIN_TARGETS.join(", ")}`;
+const bookmarkName = (name: string) => name.trim().toLowerCase().replace(/\s+/g, "-");
 
 /** Only the NoteSummary fields of a note, for lists and pins. */
 function toSummary(note: NoteSummary): NoteSummary {
@@ -419,6 +422,7 @@ export class FileStore implements NoteStore {
       }
       // A pin moves to the new slug in place. When the new slug was already pinned (a hand edit), the first place wins.
       const pins = await this.pinsAfter(oldSlug, (list) => [...new Set(list.map((s) => (s === oldSlug ? newSlug : s)))]);
+      const bookmarks = await this.bookmarksAfter(oldSlug, (slugs) => [...new Set(slugs.map((s) => (s === oldSlug ? newSlug : s)))]);
 
       await io(async () => {
         const fm: Frontmatter = { ...moving.frontmatter, updated: today() };
@@ -427,9 +431,10 @@ export class FileStore implements NoteStore {
         await fs.unlink(this.abs(oldRel));
         for (const r of rewrites) await fs.writeFile(this.abs(r.rel), r.content, "utf8");
         if (pins) await fs.writeFile(this.abs(PINS_FILE), serializePins(pins), "utf8");
+        if (bookmarks) await fs.writeFile(this.abs(BOOKMARKS_FILE), stringifyYaml(bookmarks), "utf8");
       }, `rename ${oldRel} -> ${newRel}`);
 
-      const paths = [oldRel, newRel, ...rewrites.map((r) => r.rel), ...(pins ? [PINS_FILE] : [])];
+      const paths = [oldRel, newRel, ...rewrites.map((r) => r.rel), ...(pins ? [PINS_FILE] : []), ...(bookmarks ? [BOOKMARKS_FILE] : [])];
       await this.git.commit(`${meta.tool}: rename ${oldSlug} -> ${newSlug}`, paths);
       return { note: await this.readNote(newRel), rewritten: rewrites.map((r) => r.slug) };
     });
@@ -441,11 +446,13 @@ export class FileStore implements NoteStore {
       const rel = isValidSlug(slug) ? await io(() => this.locate(slug), `locate ${slug}`) : null;
       if (!rel) throw new NotFoundError(`note ${slug}`);
       const pins = await this.pinsAfter(slug, (list) => list.filter((s) => s !== slug));
+      const bookmarks = await this.bookmarksAfter(slug, (slugs) => slugs.filter((s) => s !== slug));
       await io(async () => {
         await fs.unlink(this.abs(rel));
         if (pins) await fs.writeFile(this.abs(PINS_FILE), serializePins(pins), "utf8");
+        if (bookmarks) await fs.writeFile(this.abs(BOOKMARKS_FILE), stringifyYaml(bookmarks), "utf8");
       }, `delete ${rel}`);
-      await this.git.commit(`${meta.tool}: delete ${slug}`, pins ? [rel, PINS_FILE] : [rel]);
+      await this.git.commit(`${meta.tool}: delete ${slug}`, [rel, ...(pins ? [PINS_FILE] : []), ...(bookmarks ? [BOOKMARKS_FILE] : [])]);
     });
   }
 
@@ -596,6 +603,70 @@ export class FileStore implements NoteStore {
       await this.git.commit(`${meta.tool}: reorder ${target} pins`, [PINS_FILE]);
       return next;
     });
+  }
+
+  private async bookmarksAfter(slug: string, change: (slugs: string[]) => string[]): Promise<BookmarkLists | null> {
+    const current = await this.bookmarks();
+    const groups = current.groups.map((group) => ({ ...group, slugs: change(group.slugs) }));
+    return groups.some((group, index) => group.slugs.length !== current.groups[index]?.slugs.length || group.slugs.some((value, i) => value !== current.groups[index]?.slugs[i])) ? { groups } : null;
+  }
+
+  async bookmarks(): Promise<BookmarkLists> {
+    const raw = await io(async () => { try { return await fs.readFile(this.abs(BOOKMARKS_FILE), "utf8"); } catch (err) { if (isNodeError(err) && err.code === "ENOENT") return ""; throw err; } }, `read ${BOOKMARKS_FILE}`);
+    if (!raw.trim()) return { groups: [] };
+    let data: unknown;
+    try { data = parseYaml(raw); } catch { return { groups: [] }; }
+    if (!data || typeof data !== "object" || Array.isArray(data)) return { groups: [] };
+    const groups = Array.isArray((data as { groups?: unknown }).groups) ? (data as { groups: unknown[] }).groups : [];
+    return { groups: groups.flatMap((value) => { if (!value || typeof value !== "object") return []; const g = value as { name?: unknown; slugs?: unknown }; if (typeof g.name !== "string" || !Array.isArray(g.slugs)) return []; return [{ name: g.name, slugs: [...new Set(g.slugs.filter((s): s is string => typeof s === "string" && isValidSlug(s)))] }]; }) };
+  }
+
+  async createBookmarkGroup(name: string, meta: WriteMeta): Promise<BookmarkLists> {
+    const normalized = bookmarkName(name);
+    if (!isValidSlug(normalized)) throw new ValidationError("bookmark group name must be a lowercase slug or words separated by spaces");
+    return this.git.serialize(async () => { const current = await this.bookmarks(); if (current.groups.some((g) => g.name === normalized)) return current; const next = { groups: [...current.groups, { name: normalized, slugs: [] }] }; await fs.writeFile(this.abs(BOOKMARKS_FILE), stringifyYaml(next), "utf8"); await this.git.commit(`${meta.tool}: create bookmark group ${normalized}`, [BOOKMARKS_FILE]); return next; });
+  }
+
+  async reorderBookmarkGroups(names: string[], meta: WriteMeta): Promise<BookmarkLists> {
+    if (!Array.isArray(names) || !names.every((name) => isValidSlug(name))) throw new ValidationError("bookmark group names must be valid slugs");
+    return this.git.serialize(async () => {
+      const current = await this.bookmarks();
+      const currentNames = current.groups.map((group) => group.name);
+      const unique = new Set(names);
+      const missing = currentNames.filter((name) => !unique.has(name));
+      const unknown = names.filter((name) => !currentNames.includes(name));
+      if (unique.size !== names.length || missing.length || unknown.length || names.length !== currentNames.length) {
+        throw new ValidationError("names must contain every bookmark group exactly once");
+      }
+      const byName = new Map(current.groups.map((group) => [group.name, group]));
+      const groups = names.flatMap((name) => { const group = byName.get(name); return group ? [group] : []; });
+      if (groups.every((group, index) => group.name === current.groups[index]?.name)) return current;
+      await fs.writeFile(this.abs(BOOKMARKS_FILE), stringifyYaml({ groups }), "utf8");
+      await this.git.commit(`${meta.tool}: reorder bookmark groups`, [BOOKMARKS_FILE]);
+      return { groups };
+    });
+  }
+
+  async reorderBookmarkNotes(group: string, slugs: string[], meta: WriteMeta): Promise<BookmarkLists> {
+    if (!isValidSlug(group) || !Array.isArray(slugs) || !slugs.every((slug) => isValidSlug(slug))) throw new ValidationError("bookmark group and note slugs must be valid slugs");
+    return this.git.serialize(async () => {
+      const current = await this.bookmarks();
+      const target = current.groups.find((entry) => entry.name === group);
+      if (!target) throw new NotFoundError(`bookmark group ${group}`);
+      const unique = new Set(slugs);
+      if (unique.size !== slugs.length || slugs.length !== target.slugs.length || target.slugs.some((slug) => !unique.has(slug))) throw new ValidationError("slugs must contain every note in the bookmark group exactly once");
+      if (slugs.every((slug, index) => slug === target.slugs[index])) return current;
+      const groups = current.groups.map((entry) => entry.name === group ? { ...entry, slugs } : entry);
+      await fs.writeFile(this.abs(BOOKMARKS_FILE), stringifyYaml({ groups }), "utf8");
+      await this.git.commit(`${meta.tool}: reorder bookmarks in ${group}`, [BOOKMARKS_FILE]);
+      return { groups };
+    });
+  }
+
+  async setBookmark(slug: string, group: string, bookmarked: boolean, meta: WriteMeta): Promise<BookmarkLists> {
+    const normalized = bookmarkName(group);
+    if (!isValidSlug(slug) || !isValidSlug(normalized)) throw new ValidationError("bookmark slug and group must be valid slugs");
+    return this.git.serialize(async () => { const note = await this.locate(slug); if (!note) throw new NotFoundError(`note ${slug}`); const current = await this.bookmarks(); if (!current.groups.some((g) => g.name === normalized)) throw new NotFoundError(`bookmark group ${normalized}`); const groups = current.groups.map((g) => g.name !== normalized ? g : { ...g, slugs: bookmarked ? [...new Set([...g.slugs, slug])] : g.slugs.filter((s) => s !== slug) }); await fs.writeFile(this.abs(BOOKMARKS_FILE), stringifyYaml({ groups }), "utf8"); await this.git.commit(`${meta.tool}: ${bookmarked ? "bookmark" : "remove bookmark"} ${slug} in ${normalized}`, [BOOKMARKS_FILE]); return { groups }; });
   }
 
   // ---- inbox --------------------------------------------------------------

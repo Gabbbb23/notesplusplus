@@ -24,6 +24,8 @@ export type NoteType = z.infer<typeof contract.noteTypeSchema>;
 export type NoteSort = z.infer<typeof contract.noteSortSchema>;
 export type SearchMode = z.infer<typeof contract.searchModeSchema>;
 export type PinTarget = z.infer<typeof contract.pinTargetSchema>;
+export type BookmarkGroup = z.infer<typeof contract.bookmarkGroupSchema>;
+export type BookmarkLists = z.infer<typeof contract.bookmarkListsSchema>;
 
 /** ISO date, YYYY-MM-DD. */
 export type IsoDate = string;
@@ -83,6 +85,20 @@ export function sortSummaries<T extends Pick<NoteSummary, "title" | "slug" | "cr
 }
 
 /**
+ * The items whose title or summary holds every word of `q`, ignoring case, in the order given. A word may sit
+ * inside a longer one ("acc" matches "Accounting"), and the words may be split between title and summary.
+ * No `q`, or one with no words, keeps every item.
+ */
+export function filterSummaries<T extends Pick<NoteSummary, "title" | "summary">>(items: readonly T[], q?: string): T[] {
+  const words = (q ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [...items];
+  return items.filter((item) => {
+    const text = `${item.title}\n${item.summary}`.toLowerCase();
+    return words.every((word) => text.includes(word));
+  });
+}
+
+/**
  * The file store. Owns everything on disk in the brain repo and the git history.
  * Never touches SQLite.
  */
@@ -127,6 +143,11 @@ export interface NoteStore {
    * out and move to the end. ValidationError otherwise. One commit, or none when the order does not change.
    */
   reorderPins(target: PinTarget, slugs: string[], meta: WriteMeta): Promise<PinLists>;
+  bookmarks(): Promise<BookmarkLists>;
+  setBookmark(slug: string, group: string, bookmarked: boolean, meta: WriteMeta): Promise<BookmarkLists>;
+  createBookmarkGroup(name: string, meta: WriteMeta): Promise<BookmarkLists>;
+  reorderBookmarkGroups(names: string[], meta: WriteMeta): Promise<BookmarkLists>;
+  reorderBookmarkNotes(group: string, slugs: string[], meta: WriteMeta): Promise<BookmarkLists>;
 
   inboxList(): Promise<InboxItem[]>;
   /**
@@ -234,6 +255,11 @@ export interface Brain {
   setPin(slug: string, target: PinTarget, pinned: boolean, meta: WriteMeta): Promise<PinnedNotes>;
   /** See `NoteStore.reorderPins`. Returns every pinned note after the change. */
   reorderPins(target: PinTarget, slugs: string[], meta: WriteMeta): Promise<PinnedNotes>;
+  bookmarks(): Promise<BookmarkLists>;
+  setBookmark(slug: string, group: string, bookmarked: boolean, meta: WriteMeta): Promise<BookmarkLists>;
+  createBookmarkGroup(name: string, meta: WriteMeta): Promise<BookmarkLists>;
+  reorderBookmarkGroups(names: string[], meta: WriteMeta): Promise<BookmarkLists>;
+  reorderBookmarkNotes(group: string, slugs: string[], meta: WriteMeta): Promise<BookmarkLists>;
 
   inboxList(): Promise<InboxItem[]>;
   inboxTake(name: string, opts: InboxTakeOptions, meta: WriteMeta): Promise<InboxTakeResult>;

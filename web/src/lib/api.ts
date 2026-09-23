@@ -17,6 +17,7 @@ import type {
   SearchMode,
   SearchResponse,
   TagWithCount,
+  BookmarkLists,
 } from "./types";
 
 export interface Stats {
@@ -121,9 +122,12 @@ export function printNoteUrl(slug: string, { autoprint = false }: { autoprint?: 
 }
 
 export const api = {
-  /** One page of notes, by title unless `sort` asks for newest first. The server's default limit is 100, its maximum 500. */
+  /**
+   * One page of notes, by title unless `sort` asks for newest first. `q` keeps the notes whose title or summary
+   * holds every word of it. The server's default limit is 100, its maximum 500.
+   */
   listNotes(
-    filter: { tag?: string; type?: NoteType; sort?: NoteSort; limit?: number; offset?: number } = {},
+    filter: { tag?: string; type?: NoteType; q?: string; sort?: NoteSort; limit?: number; offset?: number } = {},
   ): Promise<NoteListPage> {
     return request<NoteListPage>(`/api/notes${query(filter)}`);
   },
@@ -173,6 +177,20 @@ export const api = {
   /** Put a target's pins in a new order: the same slugs, rearranged. Returns every pin after. */
   orderPins(target: PinTarget, slugs: string[]): Promise<PinnedNotes> {
     return putJson<PinnedNotes>(`/api/pins/${target}/order`, { slugs });
+  },
+
+  bookmarks(): Promise<BookmarkLists> { return request<BookmarkLists>("/api/bookmarks"); },
+  setBookmark(slug: string, group: string, bookmarked: boolean): Promise<BookmarkLists> {
+    return putJson<BookmarkLists>("/api/bookmarks", { slug, group, bookmarked });
+  },
+  createBookmarkGroup(name: string): Promise<BookmarkLists> {
+    return request<BookmarkLists>("/api/bookmarks/groups", { method: "POST", headers: { "Content-Type": "application/json", "X-Brain-Tool": "web" }, body: JSON.stringify({ name }) });
+  },
+  orderBookmarkGroups(names: string[]): Promise<BookmarkLists> {
+    return putJson<BookmarkLists>("/api/bookmarks/order", { names });
+  },
+  orderBookmarkNotes(group: string, slugs: string[]): Promise<BookmarkLists> {
+    return putJson<BookmarkLists>(`/api/bookmarks/${encodeURIComponent(group)}/order`, { group, slugs });
   },
 
   inbox(): Promise<InboxItem[]> {

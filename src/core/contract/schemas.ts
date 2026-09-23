@@ -130,10 +130,14 @@ export const noteListOptionsSchema = listFilterSchema.extend({
   offset: offsetSchema.optional().describe("How many notes to skip, for the next page. Default 0."),
 });
 
-/** `GET /api/notes?tag=&type=&sort=&limit=&offset=`. */
+/**
+ * `GET /api/notes?tag=&type=&q=&sort=&limit=&offset=`. `q` is REST only: the web Tag page's filter field. Agents
+ * narrow a list with `search`, so `noteListOptionsSchema` (and the MCP `list_notes` tool) leaves it out.
+ */
 export const noteListQuerySchema = z.object({
   tag: queryText,
   type: queryEnum("type", NOTE_TYPES),
+  q: queryText,
   sort: queryEnum("sort", NOTE_SORTS),
   limit: queryInteger(noteListLimitSchema, NOTE_LIST_LIMIT),
   offset: queryInteger(offsetSchema, OFFSET),
@@ -311,6 +315,13 @@ export const reorderPinsInputSchema = z.object({
   /** Every slug pinned to the target, each once, in the new order. Slugs with no note may be left out. */
   slugs: z.array(slugSchema),
 });
+
+export const bookmarkGroupSchema = z.strictObject({ name: slugSchema, slugs: z.array(slugSchema) });
+export const bookmarkListsSchema = z.strictObject({ groups: z.array(bookmarkGroupSchema) });
+export const bookmarkChangeInputSchema = z.object({ group: slugSchema, slug: slugSchema, bookmarked: z.boolean() });
+export const bookmarkGroupInputSchema = z.object({ name: z.string().trim().min(1).max(80) });
+export const bookmarkGroupOrderInputSchema = z.object({ names: z.array(slugSchema) });
+export const bookmarkNoteOrderInputSchema = z.object({ group: slugSchema, slugs: z.array(slugSchema) });
 
 // ---- inbox -----------------------------------------------------------------------------------------------------
 

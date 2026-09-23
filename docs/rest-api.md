@@ -16,7 +16,7 @@ A request that does not fit its schema gets one 400 `validation` message listing
 
 | Method | Path | Body | Response |
 |---|---|---|---|
-| GET | `/api/notes?tag=&type=&sort=&limit=&offset=` | | `NotePage`: `{ items: NoteSummary[], total, limit, offset }`, see [Note lists](#note-lists). |
+| GET | `/api/notes?tag=&type=&q=&sort=&limit=&offset=` | | `NotePage`: `{ items: NoteSummary[], total, limit, offset }`, see [Note lists](#note-lists). |
 | POST | `/api/notes` | `WriteNoteInput` | `Note` (201). Slug derived from title if absent. See [Frontmatter validation](#frontmatter-validation). |
 | GET | `/api/notes/:slug` | | `Note`, with `links` and `mentions`, see [Links and mentions](#links-and-mentions). |
 | PUT | `/api/notes/:slug` | `{ frontmatter, body, expectedMtimeMs? }` | `Note`. Create or replace at this slug, which must match the slug pattern. A `slug` in the body is ignored. |
@@ -32,6 +32,11 @@ A request that does not fit its schema gets one 400 `validation` message listing
 | GET | `/api/pins` | | `PinnedNotes`: `{ home: NoteSummary[], sidebar: NoteSummary[] }` in pin order, see [Pins](#pins). |
 | PUT | `/api/pins/:target` | `{ slug, pinned }` | `PinnedNotes`. `target` is `home` or `sidebar`. Pins to the end or unpins, see [Pins](#pins). |
 | PUT | `/api/pins/:target/order` | `{ slugs }` | `PinnedNotes`. `slugs` is every pinned slug in the new order, see [Pins](#pins). |
+| GET | `/api/bookmarks` | | `BookmarkLists`: groups with ordered note slugs. |
+| PUT | `/api/bookmarks` | `{ slug, group, bookmarked }` | `BookmarkLists`. Adds or removes a note from a group. |
+| POST | `/api/bookmarks/groups` | `{ name }` | `BookmarkLists` (201). Creates a group. |
+| PUT | `/api/bookmarks/order` | `{ names }` | `BookmarkLists`. Persists the group order after moving a group. |
+| PUT | `/api/bookmarks/:group/order` | `{ group, slugs }` | `BookmarkLists`. Persists note order inside a bookmark group. |
 | GET | `/api/inbox` | | `InboxItem[]` |
 | POST | `/api/inbox` | `{ name, content }` | `InboxItem` (201). Used by the web drop box too. |
 | POST | `/api/inbox/take` | `{ name, title?, slug?, summary? }` | `InboxTakeResult`. `slug` must match the slug pattern and `summary` fits the [summary limit](#frontmatter-validation). |
@@ -75,7 +80,8 @@ The web UI lives on the same server under `/` (not `/api`).
 - `limit` is an integer from 1 to 500, default 100 (`NOTE_LIST_LIMIT`). `offset` is an integer of 0 or more, default 0 (`OFFSET`). An empty value takes the default. Anything else, such as `limit=0`, `limit=501`, `offset=-1`, or `limit=abc`, gets 400 `validation`, one message naming each bad parameter. `type` must be note, hub, or source; an empty `tag` or `type` is ignored.
 - `items` are sorted by title, then by slug when titles are equal, so walking `offset` forward by `limit` visits every note once.
 - `sort` changes that order: `title` (the default), or `created` or `updated` for newest first. A date is a day, so notes sharing one fall back to title then slug, and paging stays stable. Anything else gets 400 `validation` (`sort must be one of title, created, updated`). Sorting happens before paging. Home's Recent section asks for `sort=created`.
-- `total` counts every note matching `tag` and `type`, not only the ones on this page. `limit` and `offset` echo what was used.
+- `q` keeps the notes whose title or summary holds every word of it, ignoring case; a word may sit inside a longer one (`q=acc` matches "Accounting"), and the words may be split between title and summary. The body is not searched. An empty or blank `q` is ignored. Filtering happens before sorting and paging. The web Tag page's filter field sends it; `GET /api/search` is still the way to find a note by its contents, and the MCP `list_notes` tool has no `q`.
+- `total` counts every note matching `tag`, `type`, and `q`, not only the ones on this page. `limit` and `offset` echo what was used.
 - An `offset` at or past the end gets `"items": []` with the real `total`.
 - Invalid files are left out of `items` and `total`; `/api/check-links` reports them.
 - The server still reads every note on each request, so paging shrinks the response, not the work. The response shape does not depend on that and stays the same if lists move to the index.

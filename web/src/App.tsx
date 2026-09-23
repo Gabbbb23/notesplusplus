@@ -11,6 +11,7 @@ import { PrintNotePage } from "@/pages/print-note";
 import { SearchPage } from "@/pages/search";
 import { TagPage } from "@/pages/tag";
 import { TagsPage } from "@/pages/tags";
+import { BookmarksPage } from "@/pages/bookmarks";
 
 export function App() {
   return (
@@ -24,6 +25,7 @@ export function App() {
           <Route path="search" element={<SearchPage />} />
           <Route path="tags" element={<TagsPage />} />
           <Route path="tags/:tag" element={<TagPage />} />
+          <Route path="bookmarks" element={<BookmarksPage />} />
           <Route path="inbox" element={<InboxPage />} />
           <Route path="files" element={<FilesPage />} />
           <Route path="check" element={<CheckPage />} />

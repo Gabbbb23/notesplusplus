@@ -131,6 +131,12 @@ export class BrainImpl implements Brain {
     return this.pinnedNotes(await this.store.reorderPins(target, slugs, meta));
   }
 
+  bookmarks() { return this.store.bookmarks(); }
+  setBookmark(slug: string, group: string, bookmarked: boolean, meta: WriteMeta) { return this.store.setBookmark(slug, group, bookmarked, meta); }
+  createBookmarkGroup(name: string, meta: WriteMeta) { return this.store.createBookmarkGroup(name, meta); }
+  reorderBookmarkGroups(names: string[], meta: WriteMeta) { return this.store.reorderBookmarkGroups(names, meta); }
+  reorderBookmarkNotes(group: string, slugs: string[], meta: WriteMeta) { return this.store.reorderBookmarkNotes(group, slugs, meta); }
+
   /** Pinned slugs as notes, in pin order. Pins never reach the index, so a hand-deleted note drops out at once. */
   private async pinnedNotes(lists: PinLists): Promise<PinnedNotes> {
     const bySlug = new Map((await this.store.summaries([...lists.home, ...lists.sidebar])).map((n) => [n.slug, n]));

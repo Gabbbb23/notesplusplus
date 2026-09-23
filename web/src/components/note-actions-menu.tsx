@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { useLayoutEffect, useRef, type RefObject } from "react";
 import { PIN_TARGET_NAME, usePins } from "@/components/pins";
+import { BookmarkAssignment } from "@/components/bookmarks";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -43,9 +44,10 @@ export interface NoteActionsMenuProps {
   onRemovedFromList?: () => void;
   /** "default": a 32px button for cards and page headers. "small": 24px, for a sidebar link. */
   size?: "default" | "small";
+  bookmarkOrder?: { group: string; index: number; count: number; onMove: (direction: "up" | "down") => void };
 }
 
-export function NoteActionsMenu({ note, pinnedList, onRemovedFromList, size = "default" }: NoteActionsMenuProps) {
+export function NoteActionsMenu({ note, pinnedList, onRemovedFromList, size = "default", bookmarkOrder }: NoteActionsMenuProps) {
   const pins = usePins();
   const pdfRunning = usePdfExportRunning(note.slug);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -107,6 +109,10 @@ export function NoteActionsMenu({ note, pinnedList, onRemovedFromList, size = "d
         >
           Pin to {PIN_TARGET_NAME.sidebar}
         </DropdownMenuCheckboxItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={(event) => event.preventDefault()}>
+          <BookmarkAssignment note={note} />
+        </DropdownMenuItem>
         {pinnedList && list && (
           <>
             <DropdownMenuSeparator />
@@ -120,6 +126,19 @@ export function NoteActionsMenu({ note, pinnedList, onRemovedFromList, size = "d
             >
               <ArrowDownIcon aria-hidden="true" />
               Move down
+            </DropdownMenuItem>
+          </>
+        )}
+        {bookmarkOrder && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem disabled={bookmarkOrder.index <= 0} onSelect={() => bookmarkOrder.onMove("up")}>
+              <ArrowUpIcon aria-hidden="true" />
+              Move up in {bookmarkOrder.group.replace(/-/g, " ")}
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={bookmarkOrder.index >= bookmarkOrder.count - 1} onSelect={() => bookmarkOrder.onMove("down")}>
+              <ArrowDownIcon aria-hidden="true" />
+              Move down in {bookmarkOrder.group.replace(/-/g, " ")}
             </DropdownMenuItem>
           </>
         )}
