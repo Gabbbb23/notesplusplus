@@ -119,9 +119,23 @@ The one way a list grows in place. No page builds its own "Show more" button.
 Where it is used:
 
 - **Search** asks for 20 results. When the response says `hasMore`, "Show more results" re-runs the same query with the limit raised by 20, up to 100; an offset would let the ranking shift between batches. The rows on screen stay while the bigger batch loads, and placeholders show only for a new query. The limit sits in the URL as `n` (left out at 20), replaced rather than pushed, so Back from a note restores the longer list and leaves the search in one step. At 100 with `hasMore`, `ShowMoreLimit` reads "Showing the top 100. Refine the search to narrow it."
-- **Tag page** loads 50 notes at a time through `offset` with `lib/use-paged-list.ts`. The header count comes from the response's `total` ("93 notes"), and "Show more notes" carries "Showing 50 of 93" until every note is loaded.
+- **Tag page** loads 50 notes at a time through `offset` with `lib/use-paged-list.ts`. The header count comes from the response's `total` ("93 notes"), and "Show more notes" carries "Showing 50 of 93" until every note is loaded. With a filter on, the count reads against the tag's own count from `GET /api/tags` ("12 of 93 notes"); see `note-list-controls.tsx`. The hook remembers, per history entry, how many notes the list had loaded (session storage, newest 50 lists), so Back or Forward to the page asks for that many in one request (`limit=100`, at most the API's 500) instead of 50, and the scroll position `history-nav.tsx` restores is reachable. A fresh visit is a new entry and starts at 50 again.
 
 The Tags page needs neither: `GET /api/tags` carries each tag's count, so it is one request.
+
+## note-list-controls.tsx
+
+`NoteListControls` (`filters`, `types`) is the row above a note list that narrows and orders it. The Tag page is its only caller.
+
+- **Filter field.** A `SearchInput` named "Filter notes" with the placeholder "Filter by title or summary". Once typing pauses for 250ms (`FILTER_DELAY_MS`), its text goes to the server as `q` on `GET /api/notes`, which keeps the notes whose title or summary holds every word, ignoring case. It filters on the server, not over the rows on screen, because the Tag page loads 50 at a time and a note not yet loaded would silently drop out.
+- **Type menu.** "Any type" plus the `types` the caller passes. The Tag page passes note and hub, since sources carry no tags.
+- **Sort menu.** "Title A to Z" (the default), "Recently added" (`created`), and "Recently updated" (`updated`), from `NOTE_SORT_OPTIONS`.
+- **Clear filters.** A ghost button, shown only while the field or the type narrows the list. It empties both at once and leaves the sort alone. The empty list then reads "No notes match these filters."
+- The field, menus, and button are 40px tall, so the row lines up. It wraps on a narrow screen, the field first at full width.
+
+`useNoteListFilters(types)` in `lib/note-list-filters.ts` holds the state. It lives in the URL as `q`, `sort`, and `type`, each left out at its default, so Back, reload, and a copied link show the same list. Every change replaces the history entry rather than pushing one, so Back leaves the page in one step. When Back or a link changes `q`, the field follows; the hook's own writes never overwrite text typed after them.
+
+While the filtered list loads, the rows already on screen stay, dimmed and `aria-busy`, with no Show more button: `usePagedList` keeps them when its third argument, `listKey` (the tag), is unchanged, and reports `stale` meanwhile. A different tag drops them at once. If the filtered first page fails, the old rows go and the error shows alone, so a failed filter never leaves the previous results looking current.
 
 ## recent-notes.tsx
 
@@ -221,6 +235,15 @@ The Alt+K shortcut that focuses the search field. `lib/shortcuts.ts` holds its f
 - `SearchInput` joins its registry through `shortcutTarget`. No page looks fields up with selectors.
 - The shortcut matches on `event.code`, so Option+K on macOS (which types "˚") still counts. It ignores key repeats, and Ctrl+Alt (AltGr on Windows layouts) never triggers it. It works from anywhere, including inside another input or textarea.
 - It prevents the default action, then focuses the Search page box when there is one, otherwise the top bar field, and selects the field's text. When no field is shown, it opens `/search` and focuses the box there.
+
+## history-nav.tsx
+
+Back and Forward in the top bar, before the search field, and the scroll memory behind them. `Layout` mounts `HistoryProvider` once inside the router and draws `HistoryNav`; no other module calls `window.scrollTo` or sets `history.scrollRestoration`.
+
+- **The buttons.** Two ghost icon buttons in a group named "History", "Back" and "Forward", each disabled while it leads nowhere, so they read like a browser's. Back is `navigate(-1)` and Forward `navigate(1)`, which is what the mouse's side buttons and Alt with an arrow do, so all three behave the same. Whether they lead anywhere comes from `lib/history-position.ts`: the keys of the entries visited since the page loaded, in order, with PUSH cutting off the forward ones, REPLACE swapping the current one, and POP moving along them. After a reload the stack holds one key; Back still enables when react-router's `history.state.idx` says the browser has earlier entries of the app, and Forward waits until the app has seen a later one.
+- **The scroll memory.** Every scroll is recorded under the current entry's `location.key` (`lib/scroll-memory.ts`, mirrored to session storage so a reload keeps it, newest 50). On POP (Back, Forward, the side buttons) the provider scrolls to the entry's remembered position. The page is usually still a loading block then, so `restoreScroll` tries on every animation frame until the page is tall enough to reach the position, or two seconds pass and it scrolls as far as it can; it stops at once when the reader wheels, touches, or presses a key. The browser's own restoration is switched off (`scrollRestoration = "manual"`) because it would scroll before the note has loaded.
+- **New pages open at the top.** A PUSH without a hash scrolls to 0 before the new page paints. A PUSH to a heading (`#note-heading-3`) is left to the browser, and a REPLACE (the Tag page's filters, the search limit) leaves the scroll where it is.
+- **Heading links are entries too.** An outline link is a plain `#heading` anchor, so the browser makes the history entry itself, with no router state: the router calls every such entry `default`, the first page's key, and `history.state.idx` is missing. The provider names it `default#note-heading-3` instead, and the stack treats an unknown entry with no index as one pushed after the current, so Back still leads to the pages before it. The browser scrolls to the heading before the router hears of the entry; that scroll would be recorded against the page left, so scroll events are dropped while `window.location.hash` differs from the entry on record. Reaching such an entry again with Forward scrolls the heading into view.
 
 ## pins.tsx
 

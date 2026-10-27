@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useEffect, useId, useState, type FormEvent } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate, useSearchParams } from "react-router";
+import { HistoryNav, HistoryProvider } from "@/components/history-nav";
 import { NoteActionsMenu, usePinnedListFocus } from "@/components/note-actions-menu";
 import { PinsProvider, usePins } from "@/components/pins";
 import { SearchInput } from "@/components/search-input";
@@ -183,64 +184,68 @@ function TopSearch({ className }: { className?: string }) {
 export function Layout() {
   const [open, setOpen] = useState(false);
   return (
-    // Mounts the one Alt+K listener and the registry that the search fields join, and the one copy of the pins.
+    // Mounts the one Alt+K listener and the registry that the search fields join, the one copy of the pins,
+    // and the history position and scroll memory behind Back and Forward.
     <SearchShortcutProvider>
       <PinsProvider>
-        <div className="min-h-screen md:flex">
-          {/* Sidebar, desktop */}
-          <aside className="hidden w-60 shrink-0 border-r bg-sidebar md:sticky md:top-0 md:flex md:h-screen md:flex-col">
-            <div className="flex h-16 items-center px-3">
-              <Brand />
-            </div>
-            <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-3 pb-3">
-              <NavLinks />
-              <PinnedLinks />
-            </div>
-            <div className="px-5 py-4 text-xs text-muted-foreground">The agent writes the notes.</div>
-          </aside>
-
-          <div className="flex min-w-0 flex-1 flex-col">
-            {/* Top bar: search everywhere, plus the menu button under 768px */}
-            <header className="sticky top-0 z-10 flex h-16 items-center gap-3 border-b bg-background/95 px-4 backdrop-blur md:px-8">
-              <Sheet open={open} onOpenChange={setOpen}>
-                <SheetTrigger asChild>
-                  <Button variant="ghost" size="icon" className="md:hidden" aria-label="Open menu">
-                    <MenuIcon />
-                  </Button>
-                </SheetTrigger>
-                <SheetContent
-                  side="left"
-                  className="w-64 bg-sidebar p-3"
-                  // Radix focuses the first button that is not a link, which is now a pinned row's menu. Keep it on Close.
-                  onOpenAutoFocus={(event) => {
-                    const close = (event.currentTarget as HTMLElement).querySelector<HTMLElement>("[data-slot='sheet-close-button']");
-                    if (!close) return;
-                    event.preventDefault();
-                    close.focus();
-                  }}
-                >
-                  <SheetTitle className="sr-only">Navigation</SheetTitle>
-                  <SheetDescription className="sr-only">Pages of the notes app</SheetDescription>
-                  <div className="mb-4 flex h-10 items-center">
-                    <Brand />
-                  </div>
-                  <div className="-mx-3 min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-3">
-                    <NavLinks onNavigate={() => setOpen(false)} />
-                    <PinnedLinks onNavigate={() => setOpen(false)} />
-                  </div>
-                </SheetContent>
-              </Sheet>
-              <div className="md:hidden">
+        <HistoryProvider>
+          <div className="min-h-screen md:flex">
+            {/* Sidebar, desktop */}
+            <aside className="hidden w-60 shrink-0 border-r bg-sidebar md:sticky md:top-0 md:flex md:h-screen md:flex-col">
+              <div className="flex h-16 items-center px-3">
                 <Brand />
               </div>
-              <TopSearch className="ml-auto w-full max-w-md" />
-            </header>
+              <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-3 pb-3">
+                <NavLinks />
+                <PinnedLinks />
+              </div>
+              <div className="px-5 py-4 text-xs text-muted-foreground">The agent writes the notes.</div>
+            </aside>
 
-            <main className="mx-auto w-full max-w-[52rem] flex-1 px-4 py-8 md:px-8">
-              <Outlet />
-            </main>
+            <div className="flex min-w-0 flex-1 flex-col">
+              {/* Top bar: search everywhere, plus the menu button under 768px */}
+              <header className="sticky top-0 z-10 flex h-16 items-center gap-3 border-b bg-background/95 px-4 backdrop-blur md:px-8">
+                <Sheet open={open} onOpenChange={setOpen}>
+                  <SheetTrigger asChild>
+                    <Button variant="ghost" size="icon" className="md:hidden" aria-label="Open menu">
+                      <MenuIcon />
+                    </Button>
+                  </SheetTrigger>
+                  <SheetContent
+                    side="left"
+                    className="w-64 bg-sidebar p-3"
+                    // Radix focuses the first button that is not a link, which is now a pinned row's menu. Keep it on Close.
+                    onOpenAutoFocus={(event) => {
+                      const close = (event.currentTarget as HTMLElement).querySelector<HTMLElement>("[data-slot='sheet-close-button']");
+                      if (!close) return;
+                      event.preventDefault();
+                      close.focus();
+                    }}
+                  >
+                    <SheetTitle className="sr-only">Navigation</SheetTitle>
+                    <SheetDescription className="sr-only">Pages of the notes app</SheetDescription>
+                    <div className="mb-4 flex h-10 items-center">
+                      <Brand />
+                    </div>
+                    <div className="-mx-3 min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-3">
+                      <NavLinks onNavigate={() => setOpen(false)} />
+                      <PinnedLinks onNavigate={() => setOpen(false)} />
+                    </div>
+                  </SheetContent>
+                </Sheet>
+                <div className="md:hidden">
+                  <Brand />
+                </div>
+                <HistoryNav className="flex items-center gap-1" />
+                <TopSearch className="ml-auto w-full max-w-md" />
+              </header>
+
+              <main className="mx-auto w-full max-w-[52rem] flex-1 px-4 py-8 md:px-8">
+                <Outlet />
+              </main>
+            </div>
           </div>
-        </div>
+        </HistoryProvider>
         <Toaster position="bottom-right" />
       </PinsProvider>
     </SearchShortcutProvider>
