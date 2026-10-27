@@ -28,17 +28,18 @@ export function TagPage() {
   const { q, sort, type } = filters;
   const [view, setView] = useState<NoteView>("list");
   const notes = usePagedList(
-    (offset) =>
+    (offset, limit) =>
       api.listNotes({
         tag,
         type,
         q: q || undefined,
         sort: sort === "title" ? undefined : sort,
-        limit: TAG_PAGE_SIZE,
+        limit,
         offset,
       }),
     [tag, type, q, sort],
     tag,
+    TAG_PAGE_SIZE,
   );
   const tags = useAsync(() => api.tags(), []);
   const tagInfo = tags.data?.find((t) => t.name === tag);

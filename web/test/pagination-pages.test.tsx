@@ -2,7 +2,8 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/App";
-import type { NoteSummary, SearchResult } from "../src/lib/types";
+import type { Note, NoteSummary, SearchResult } from "../src/lib/types";
+import { forgetLoadedCounts } from "../src/lib/use-paged-list";
 
 /** The minimum of a fetch Response that lib/api.ts reads. */
 function reply(status: number, body: unknown): Response {
@@ -51,6 +52,9 @@ const cards = () => Array.from(document.querySelectorAll<HTMLElement>("main [dat
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  // Every test's router starts at the same entry key, so a remembered list length would leak into the next test.
+  forgetLoadedCounts();
+  window.sessionStorage.clear();
 });
 
 // ---------------------------------------------------------------------------
@@ -276,6 +280,43 @@ describe("Tag page", () => {
 
     await screen.findByRole("link", { name: "College note 12" });
     expect(screen.getByText("12 notes")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Show more notes" })).toBeNull();
+  });
+
+  it("comes back from a note with every note it had loaded, in one request", async () => {
+    const first = noteSummary(1);
+    const note: Note = {
+      ...first,
+      frontmatter: { title: first.title, type: first.type, summary: "", tags: first.tags, created: first.created, updated: first.updated },
+      body: "Body text.",
+      raw: "",
+      links: [],
+      mentions: [],
+      mtimeMs: 0,
+    };
+    const fetchMock = stubApi({
+      "/api/tags": TAGS,
+      [notesUrl(0)]: () => reply(200, { items: notes(1, 50), total: 93, limit: 50, offset: 0 }),
+      [notesUrl(50)]: () => reply(200, { items: notes(51, 93), total: 93, limit: 50, offset: 50 }),
+      "/api/notes?tag=college&limit=93&offset=0": () => reply(200, { items: notes(1, 93), total: 93, limit: 93, offset: 0 }),
+      [`/api/notes/${first.slug}`]: () => reply(200, note),
+      [`/api/notes/${first.slug}/backlinks`]: () => reply(200, []),
+      [`/api/notes/${first.slug}/trail`]: () => reply(200, { trail: [], inHub: false }),
+    });
+    renderAt("/tags/college");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Show more notes" }));
+    await screen.findByRole("link", { name: "College note 93" });
+
+    fireEvent.click(screen.getByRole("link", { name: "College note 01" }));
+    await screen.findByRole("heading", { level: 1, name: "College note 01" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await screen.findByRole("link", { name: "College note 93" });
+
+    expect(cards()).toHaveLength(93);
+    expect(urls(fetchMock).filter((u) => u === "/api/notes?tag=college&limit=93&offset=0")).toHaveLength(1);
+    expect(urls(fetchMock).filter((u) => u === notesUrl(0))).toHaveLength(1);
     expect(screen.queryByRole("button", { name: "Show more notes" })).toBeNull();
   });
 
