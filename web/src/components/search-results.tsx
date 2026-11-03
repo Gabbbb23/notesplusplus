@@ -58,7 +58,7 @@ export function SearchResults({
   const count = plural(results.length, "result");
   return (
     <CardList>
-      <p className="text-muted-foreground text-sm" data-testid="result-count">
+      <p className="text-body-medium text-on-surface-variant" data-testid="result-count">
         {hasMore ? `More than ${count}` : count} for “{query}”
       </p>
       {results.map((r) => (

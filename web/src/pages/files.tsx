@@ -17,7 +17,7 @@ const columns: Column<FileEntry>[] = [
   {
     id: "modified",
     header: "Modified",
-    cell: (f) => <span className="text-muted-foreground">{formatTime(f.mtimeMs)}</span>,
+    cell: (f) => <span className="text-on-surface-variant">{formatTime(f.mtimeMs)}</span>,
   },
   {
     id: "actions",

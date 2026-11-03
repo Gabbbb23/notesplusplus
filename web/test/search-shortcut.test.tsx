@@ -194,9 +194,9 @@ describe("the shortcut hint in <SearchInput>", () => {
     const shown = hint()!;
     expect(shown).toHaveAttribute("aria-hidden", "true");
     expect(Array.from(shown.querySelectorAll("kbd"), (k) => k.textContent)).toEqual([...FOCUS_SEARCH.keys]);
-    // Only from the md width up, on devices with hover and a fine pointer, with room kept so text never runs under it.
-    expect(shown).toHaveClass("hidden", "md:[@media(hover:hover)_and_(pointer:fine)]:flex", "pointer-events-none");
-    expect(field).toHaveClass("md:[@media(hover:hover)_and_(pointer:fine)]:pr-20");
+    // Only from the medium window class up, on devices with hover and a fine pointer, with room kept so text never runs under it.
+    expect(shown).toHaveClass("hidden", "medium:[@media(hover:hover)_and_(pointer:fine)]:flex", "pointer-events-none");
+    expect(field).toHaveClass("medium:[@media(hover:hover)_and_(pointer:fine)]:pr-20");
     expect(field.className).not.toMatch(/(?:^|\s)\[@media/);
   });
 

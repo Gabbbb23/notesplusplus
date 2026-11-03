@@ -14,7 +14,7 @@ import { TOP_LEVEL_CRUMBS } from "@/lib/breadcrumb-items";
  * item-card.tsx so they share the card shell.
  */
 
-/** Rows of grey bars standing in for a list or a note body while it loads. */
+/** Rows of placeholder bars standing in for a list or a note body while it loads. */
 export function LoadingBlock({ lines = 4, className }: { lines?: number; className?: string }) {
   return (
     <div className={className ?? "space-y-3"} aria-busy="true" aria-label="Loading">
@@ -29,7 +29,7 @@ export function LoadingBlock({ lines = 4, className }: { lines?: number; classNa
 /** The "Try again" button inside an error notice, under its message. */
 function RetryButton({ onRetry }: { onRetry: () => void }) {
   return (
-    <Button type="button" variant="outline" size="sm" className="mt-2" onClick={onRetry}>
+    <Button type="button" variant="outlined" size="small" className="mt-2" onClick={onRetry}>
       <RotateCwIcon aria-hidden="true" />
       Try again
     </Button>
@@ -68,9 +68,9 @@ export function ErrorAlert({ error, title, onRetry }: ErrorAlertProps) {
   );
 }
 
-/** Quiet grey text for an empty list. */
+/** Quiet on-surface-variant text for an empty list. */
 export function EmptyState({ children }: { children: ReactNode }) {
-  return <p className="text-muted-foreground py-6 text-center text-sm">{children}</p>;
+  return <p className="py-6 text-center text-body-medium text-on-surface-variant">{children}</p>;
 }
 
 /**
@@ -89,7 +89,7 @@ export function NotFoundState({ title, message, value }: { title: string; messag
           </>
         }
       />
-      <Button asChild variant="outline">
+      <Button asChild variant="tonal">
         <Link to="/">Back home</Link>
       </Button>
     </div>

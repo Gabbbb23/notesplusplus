@@ -48,15 +48,15 @@ function ActionButton({
   return (
     <Button
       type="button"
-      variant={compact ? "ghost" : "outline"}
-      size={compact ? "icon-xs" : "sm"}
+      variant={compact ? "standard" : "outlined"}
+      size={compact ? "icon-small" : "small"}
       aria-label={accessibleName}
       title={compact ? hint : undefined}
       disabled={busy}
       aria-busy={busy || undefined}
       onClick={onClick}
     >
-      <Icon aria-hidden="true" className={compact ? "size-4" : undefined} />
+      <Icon aria-hidden="true" />
       {!compact && text}
     </Button>
   );
@@ -67,7 +67,7 @@ export interface FileActionsProps {
   path: string;
   /** Names the file in accessible names and toasts. Default: the last segment of path. */
   name?: string;
-  /** "default": outline buttons with a label. "compact": icon buttons with a tooltip, to sit after a line of text. */
+  /** "default": outlined small buttons with a label. "compact": 32px icon buttons with a tooltip, to sit after a line of text. */
   size?: FileActionsSize;
 }
 
@@ -100,12 +100,13 @@ export function FileActions({ path, name, size = "default" }: FileActionsProps) 
   };
 
   // One unit that never breaks inside: after text it moves to the next line as a whole, and a
-  // fit table column (w-px) sizes to it instead of stacking the controls.
+  // fit table column (w-px) sizes to it instead of stacking the controls. Compact, the negative
+  // margins let the 32px icon buttons share a 24px line of text without making the line taller.
   return (
     <span
       data-slot="file-actions"
       data-size={size}
-      className={cn("inline-flex shrink-0 items-center whitespace-nowrap align-middle", compact ? "gap-1" : "gap-2")}
+      className={cn("inline-flex shrink-0 items-center whitespace-nowrap align-middle", compact ? "-my-1 gap-1" : "gap-2")}
     >
       {isOpenable(path) && (
         <ActionButton

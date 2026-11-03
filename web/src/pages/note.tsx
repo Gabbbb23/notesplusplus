@@ -1,4 +1,5 @@
 import { useParams } from "react-router";
+import { useRef } from "react";
 import { KindBadge, TagBadges, TagName } from "@/components/badges";
 import { BreakableText } from "@/components/breakable-text";
 import { Callout } from "@/components/callout";
@@ -7,6 +8,7 @@ import { LoadingCards } from "@/components/item-card";
 import { MetaItem, MetaList } from "@/components/meta";
 import { NoteActionsMenu } from "@/components/note-actions-menu";
 import { NoteBody, SourceBody } from "@/components/note-body";
+import { NoteOutline } from "@/components/note-outline";
 import { NoteList } from "@/components/note-card";
 import { PageHeader } from "@/components/page-header";
 import { ErrorAlert, LoadingBlock, NotFoundState } from "@/components/page-state";
@@ -18,6 +20,7 @@ import { noteCrumbs } from "@/lib/breadcrumb-items";
 import { useAsync } from "@/lib/use-async";
 
 export function NotePage() {
+  const bodyRef = useRef<HTMLDivElement>(null);
   const { slug = "" } = useParams();
   const note = useAsync(() => api.getNote(slug), [slug]);
   const backlinks = useAsync(() => api.backlinks(slug), [slug]);
@@ -45,7 +48,7 @@ export function NotePage() {
   const breadcrumbs = noteCrumbs(settledTrail, n.tags, (tag) => <TagName name={tag} />);
 
   return (
-    <article>
+    <article className="note-page">
       <PageHeader
         title={n.title}
         badge={<KindBadge kind={n.type} />}
@@ -85,7 +88,14 @@ export function NotePage() {
         </MetaList>
       </PageHeader>
 
-      {n.type === "source" ? <SourceBody text={n.body} /> : <NoteBody markdown={n.body} mentions={n.mentions} />}
+      {n.type === "source" ? (
+        <SourceBody text={n.body} />
+      ) : (
+        <div className="note-content-grid">
+          <div ref={bodyRef} className="min-w-0"><NoteBody markdown={n.body} mentions={n.mentions} /></div>
+          <aside className="note-outline"><NoteOutline bodyRef={bodyRef} markdown={n.body} /></aside>
+        </div>
+      )}
 
       <Separator className="my-10" />
 

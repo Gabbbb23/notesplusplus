@@ -5,9 +5,10 @@ import type { Crumb } from "@/lib/breadcrumb-items";
 import { usePageTitle } from "@/lib/page-title";
 
 /**
- * The top of every page: optional breadcrumbs, then one h1 size everywhere, an optional badge
- * after the title, an optional aside on the right (a count), optional actions at the right end of
- * the title row (a note's menu), a muted description, and optional extra rows (note metadata).
+ * The top of every page: optional breadcrumbs 8px above the title, then the h1 in headline-medium
+ * everywhere, an optional badge after the title, an optional aside on the right (a count), optional
+ * actions at the right end of the title row (a note's menu), an on-surface-variant description, and
+ * optional extra rows (note metadata).
  * A string title wraps at natural break points.
  *
  * It also sets the browser tab title, "<tabTitle> · notes++", for as long as it is on screen.
@@ -49,12 +50,12 @@ export function PageHeader({
       <div className="flex items-start gap-x-3">
         <div className="flex min-w-0 flex-1 flex-wrap items-end justify-between gap-x-4 gap-y-1">
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-            <h1 className="min-w-0 text-2xl font-semibold tracking-tight">
+            <h1 className="min-w-0 text-headline-medium text-on-surface">
               {typeof title === "string" ? <BreakableText text={title} /> : title}
             </h1>
             {badge}
           </div>
-          {aside && <div className="text-sm text-muted-foreground">{aside}</div>}
+          {aside && <div className="text-body-medium text-on-surface-variant">{aside}</div>}
         </div>
         {actions && (
           <div data-slot="page-header-actions" className="flex shrink-0 items-center gap-1">
@@ -62,7 +63,7 @@ export function PageHeader({
           </div>
         )}
       </div>
-      {description && <div className="text-muted-foreground">{description}</div>}
+      {description && <div className="text-body-medium text-on-surface-variant">{description}</div>}
       {children}
     </header>
   );

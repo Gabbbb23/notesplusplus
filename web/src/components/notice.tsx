@@ -4,21 +4,19 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
 
 /*
- * Every alert box in the app. This is the only module that imports the shadcn Alert.
- * Same padding (16px) and radius (8px) as a card; the tone sets the colours and default icon.
+ * Every alert box in the app. This is the only module that imports the shadcn Alert, which draws the
+ * shape (12px corners, 16px padding, no border, title small over body medium). The tone sets the
+ * container colour, its on-colour for the title and the message, and the default icon.
  */
 
 export type NoticeTone = "info" | "success" | "warning" | "danger";
 
-const SHELL_CLASS = "rounded-lg p-4 wrap-break-word";
-
 const TONE_CLASS: Record<NoticeTone, string> = {
-  info: "border-primary/40 bg-accent text-accent-foreground *:data-[slot=alert-description]:text-foreground/90",
-  // The success, warning, and danger messages share the title colour. test/contrast.test.ts checks every tone at 4.5:1.
-  success: "border-success/40 bg-success-tint text-success *:data-[slot=alert-description]:text-success",
-  warning:
-    "border-status-warning-fg/40 bg-status-warning-bg text-status-warning-fg *:data-[slot=alert-description]:text-status-warning-fg",
-  danger: "bg-card text-destructive *:data-[slot=alert-description]:text-destructive",
+  // The message uses the title colour at full strength. test/contrast.test.ts checks every tone at 4.5:1.
+  info: "bg-secondary-container text-on-secondary-container *:data-[slot=alert-description]:text-on-secondary-container",
+  success: "bg-success-container text-on-success-container *:data-[slot=alert-description]:text-on-success-container",
+  warning: "bg-warning-container text-on-warning-container *:data-[slot=alert-description]:text-on-warning-container",
+  danger: "bg-error-container text-on-error-container *:data-[slot=alert-description]:text-on-error-container",
 };
 
 const TONE_ICON: Record<NoticeTone, LucideIcon> = {
@@ -51,10 +49,11 @@ export function Notice({ tone = "info", title, children, icon, live = true }: No
       data-slot="notice"
       data-tone={tone}
       role={live ? "alert" : "note"}
-      className={cn(SHELL_CLASS, TONE_CLASS[tone])}
+      className={cn("wrap-break-word", TONE_CLASS[tone])}
     >
       <Icon aria-hidden="true" />
-      <AlertTitle>{title}</AlertTitle>
+      {/* A long title wraps instead of being cut at one line. */}
+      <AlertTitle className="line-clamp-none">{title}</AlertTitle>
       {children && <AlertDescription>{children}</AlertDescription>}
     </Alert>
   );

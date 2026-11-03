@@ -40,7 +40,7 @@ conventions/
   file.md            the "file this material" skill, served as an MCP prompt.
   garden.md          the "tidy the store" skill, served as an MCP prompt.
 test/                vitest
-web/                 React + Vite + Tailwind + shadcn UI. Own package.json; read-only pages plus the inbox drop box.
+web/                 React + Vite + Tailwind + shadcn UI, styled as Material 3. Own package.json; read-only pages plus the inbox drop box.
   src/lib/api.ts     typed client over docs/rest-api.md
   src/components/    shared table, badge, card, page header, and long-text components every page reuses (see its README.md)
   src/pages/         home, note, search, tags, inbox, files, check

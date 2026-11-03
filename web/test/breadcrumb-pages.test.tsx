@@ -219,6 +219,7 @@ describe("other pages", () => {
     await screen.findByRole("heading", { level: 1, name: "Index" });
     await settle();
     expect(screen.queryByRole("navigation", { name: "Breadcrumb" })).toBeNull();
-    expect(screen.getByRole("navigation", { name: "Main" })).toBeInTheDocument();
+    // The drawer's and the rail's; CSS shows one at a time.
+    expect(screen.getAllByRole("navigation", { name: "Main" })).toHaveLength(2);
   });
 });

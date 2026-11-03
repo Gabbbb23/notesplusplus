@@ -14,9 +14,9 @@ function Section({ title, count, children }: { title: string; count: number; chi
   return (
     <SectionCard title={title} count={count}>
       {count === 0 ? (
-        <p className="text-sm text-muted-foreground">None.</p>
+        <p className="text-body-medium text-on-surface-variant">None.</p>
       ) : (
-        <ul className="space-y-2 text-sm">{children}</ul>
+        <ul className="space-y-2 text-body-medium">{children}</ul>
       )}
     </SectionCard>
   );
@@ -31,7 +31,7 @@ function From({ slug }: { slug: string }) {
 }
 
 function Arrow() {
-  return <span className="text-muted-foreground"> → </span>;
+  return <span className="text-on-surface-variant"> → </span>;
 }
 
 function Report({ r }: { r: LinkReport }) {
@@ -84,7 +84,7 @@ function Report({ r }: { r: LinkReport }) {
         {r.invalidNotes.map((n, i) => (
           <li key={i}>
             <BreakableText as="code" className="font-mono" text={n.path} />
-            <span className="text-muted-foreground">: {n.error}</span>
+            <span className="text-on-surface-variant">: {n.error}</span>
           </li>
         ))}
       </Section>
@@ -99,10 +99,10 @@ function Report({ r }: { r: LinkReport }) {
         {r.notesInSeveralHubs.map((n) => (
           <li key={n.slug}>
             <From slug={n.slug} />
-            <span className="text-muted-foreground"> in </span>
+            <span className="text-on-surface-variant"> in </span>
             {n.hubs.map((hub, i) => (
               <span key={hub}>
-                {i > 0 && <span className="text-muted-foreground">, </span>}
+                {i > 0 && <span className="text-on-surface-variant">, </span>}
                 <TextLink to={noteUrl(hub)}>{hub}</TextLink>
               </span>
             ))}

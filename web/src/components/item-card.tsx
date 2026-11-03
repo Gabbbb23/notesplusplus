@@ -5,15 +5,17 @@ import { BreakableText } from "@/components/breakable-text";
 import { MetaRow } from "@/components/meta";
 import { TextLink } from "@/components/text-link";
 import { Card } from "@/components/ui/card";
+import { Ripple } from "@/components/ui/ripple";
 import { Skeleton } from "@/components/ui/skeleton";
+import { FOCUS_RING } from "@/lib/focus-ring";
 import { cn } from "@/lib/utils";
 
 /*
- * Every card in the app. This is the only module that imports the shadcn Card.
- * All cards share one shell: white surface, hairline border, 8px radius, 16px padding.
+ * Every card in the app. This is the only module that imports the shadcn Card, which is the M3
+ * outlined card. Home's stats turn it into the filled card.
  */
 
-const SHELL_CLASS = "min-w-0 gap-0 rounded-lg p-4 shadow-none wrap-break-word";
+const SHELL_CLASS = "min-w-0 wrap-break-word";
 
 /**
  * A card title and where it points: an in-app route (to), a site opened in a new tab (href), or
@@ -39,7 +41,7 @@ function CardTitle({ title }: { title: ItemCardTitle }) {
       </TextLink>
     );
   }
-  return <BreakableText className="text-base font-medium" text={title.text} />;
+  return <BreakableText className="text-title-medium" text={title.text} />;
 }
 
 export interface ItemCardProps {
@@ -63,21 +65,24 @@ export interface ItemCardProps {
 /** One thing in a list: a note, a search result, a backlink. */
 export function ItemCard({ title, badge, summary, snippet, meta, actions }: ItemCardProps) {
   return (
-    <Card data-slot="item-card" className={cn(SHELL_CLASS, "gap-1.5 transition-colors hover:border-card-hover-border")}>
+    <Card data-slot="item-card" className={cn(SHELL_CLASS, "gap-2")}>
       <div className="flex items-start gap-2">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
           <CardTitle title={title} />
           {badge}
         </div>
-        {/* A 32px button on a 24px title line: the negative margins keep the card's height and tuck it into the corner. */}
+        {/*
+         * A 40px icon button on a 24px title line: the negative margins keep the card's height, and the
+         * right one lines the icon up with the card's 16px padding.
+         */}
         {actions && (
-          <div data-slot="item-card-actions" className="-my-1 -mr-2 flex shrink-0 items-center gap-1">
+          <div data-slot="item-card-actions" className="-my-2 -mr-2 flex shrink-0 items-center gap-1">
             {actions}
           </div>
         )}
       </div>
-      {summary && <div className="text-sm text-muted-foreground">{summary}</div>}
-      {snippet && <div className="text-sm leading-relaxed">{snippet}</div>}
+      {summary && <div className="text-body-medium text-on-surface-variant">{summary}</div>}
+      {snippet && <div className="text-body-medium">{snippet}</div>}
       {meta && <MetaRow>{meta}</MetaRow>}
     </Card>
   );
@@ -85,7 +90,7 @@ export function ItemCard({ title, badge, summary, snippet, meta, actions }: Item
 
 /** A vertical stack of cards with the standard gap. */
 export function CardList({ children }: { children: ReactNode }) {
-  return <div className="space-y-3">{children}</div>;
+  return <div className="space-y-2">{children}</div>;
 }
 
 /**
@@ -104,20 +109,23 @@ export function SectionCard({
   children: ReactNode;
 }) {
   return (
-    <Card data-slot="section-card" className={cn(SHELL_CLASS, "gap-3")}>
+    <Card data-slot="section-card" className={cn(SHELL_CLASS, "gap-4")}>
       <div className="space-y-1">
-        <h2 className="flex flex-wrap items-center gap-2 text-base leading-snug font-semibold">
+        <h2 className="flex flex-wrap items-center gap-2 text-title-medium">
           {title}
           {count !== undefined && <StatusBadge tone={count === 0 ? "neutral" : "danger"}>{count}</StatusBadge>}
         </h2>
-        {description && <p className="text-sm text-muted-foreground">{description}</p>}
+        {description && <p className="text-body-medium text-on-surface-variant">{description}</p>}
       </div>
       <div className="min-w-0">{children}</div>
     </Card>
   );
 }
 
-/** A number with a label, linking to the page that explains it. warn paints the number red. */
+/**
+ * A number with a label on an M3 filled card, the whole card one link to the page that explains it.
+ * warn paints the number in the error role.
+ */
 export function StatCard({
   label,
   value,
@@ -131,28 +139,29 @@ export function StatCard({
   warn?: boolean;
 }) {
   return (
-    <Card data-slot="stat-card" className={cn(SHELL_CLASS, "transition-colors hover:border-card-hover-border")}>
-      <Link to={to} className="block">
+    <Card data-slot="stat-card" className="min-w-0 gap-0 border-0 bg-surface-container-highest p-0">
+      <Link to={to} className={cn("relative block rounded-medium p-4", FOCUS_RING)}>
         {value === undefined ? (
-          <Skeleton className="h-8 w-12" />
+          <Skeleton className="h-9 w-12" />
         ) : (
-          <div className={cn("text-2xl font-semibold", warn && "text-destructive")}>{value}</div>
+          <div className={cn("text-headline-medium", warn && "text-error")}>{value}</div>
         )}
-        <div className="text-xs tracking-wide text-muted-foreground uppercase">{label}</div>
+        <div className="text-label-large text-on-surface-variant">{label}</div>
+        <Ripple />
       </Link>
     </Card>
   );
 }
 
-/** Card-shaped placeholders for a list while it loads. */
+/** Outlined card shapes with placeholder bars for a list while it loads. */
 export function LoadingCards({ count = 3 }: { count?: number }) {
   return (
-    <div className="space-y-3" aria-busy="true" aria-label="Loading">
+    <div className="space-y-2" aria-busy="true" aria-label="Loading">
       {Array.from({ length: count }, (_, i) => (
         <Card key={i} className={cn(SHELL_CLASS, "gap-2")}>
-          <Skeleton className="h-5 w-1/3" />
-          <Skeleton className="h-4 w-4/5" />
-          <Skeleton className="h-3 w-1/4" />
+          <Skeleton className="h-6 w-1/3" />
+          <Skeleton className="h-5 w-4/5" />
+          <Skeleton className="h-4 w-1/4" />
         </Card>
       ))}
     </div>

@@ -24,7 +24,7 @@ const columns: Column<TagWithCount>[] = [
     id: "description",
     header: "Description",
     size: "fill",
-    cell: (t) => <span className="text-muted-foreground">{t.description}</span>,
+    cell: (t) => <span className="text-on-surface-variant">{t.description}</span>,
   },
   { id: "count", header: "Notes", align: "end", cell: (t) => t.count },
 ];

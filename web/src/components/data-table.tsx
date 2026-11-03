@@ -222,11 +222,12 @@ function useTableLayout(mode: TableLayoutMode) {
 const STACKED_WHOLE_TOKEN_CLASS =
   "data-[layout=stacked]:**:data-[cell-token=whole]:inline-block data-[layout=stacked]:**:data-[cell-token=whole]:max-w-full data-[layout=stacked]:**:data-[cell-token=whole]:whitespace-normal";
 
-const WRAPPER_CLASS = `group/table relative w-full min-w-0 overflow-hidden rounded-lg border bg-card text-sm text-card-foreground wrap-break-word ${STACKED_WHOLE_TOKEN_CLASS}`;
+/** The M3 outlined container, in both layouts: cells in body medium on the surface colour. */
+const WRAPPER_CLASS = `group/table relative w-full min-w-0 overflow-hidden rounded-medium border border-outline-variant bg-surface text-body-medium text-on-surface wrap-break-word ${STACKED_WHOLE_TOKEN_CLASS}`;
 
 const TABLE_CLASS = "w-full border-collapse group-data-[layout=stacked]/table:block";
 
-const HEADER_CLASS = "bg-muted group-data-[layout=stacked]/table:sr-only";
+const HEADER_CLASS = "bg-surface-container-low group-data-[layout=stacked]/table:sr-only";
 
 const BODY_CLASS = "group-data-[layout=stacked]/table:block";
 
@@ -260,14 +261,14 @@ const ALIGN_CLASS = {
 } as const;
 
 const PRIMARY_CLASS =
-  "font-medium group-data-[layout=stacked]/table:order-first group-data-[layout=stacked]/table:block group-data-[stack=grid]/table:col-span-full";
+  "text-title-small group-data-[layout=stacked]/table:order-first group-data-[layout=stacked]/table:block group-data-[stack=grid]/table:col-span-full";
 
 /**
- * Stacked layout: a small muted label (from data-label) with its value. List: label on the left,
- * value on the right. Grid: label above value.
+ * Stacked layout: a label (from data-label, label medium in on-surface-variant) with its value. List:
+ * label on the left, value on the right. Grid: label above value.
  */
 const LABELLED_CLASS =
-  "group-data-[layout=stacked]/table:before:content-[attr(data-label)] group-data-[layout=stacked]/table:before:text-xs group-data-[layout=stacked]/table:before:font-normal group-data-[layout=stacked]/table:before:text-muted-foreground group-data-[stack=list]/table:grid group-data-[stack=list]/table:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] group-data-[stack=list]/table:items-baseline group-data-[stack=list]/table:gap-x-3 group-data-[stack=grid]/table:block group-data-[stack=grid]/table:before:block";
+  "group-data-[layout=stacked]/table:before:content-[attr(data-label)] group-data-[layout=stacked]/table:before:text-label-medium group-data-[layout=stacked]/table:before:text-on-surface-variant group-data-[stack=list]/table:grid group-data-[stack=list]/table:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] group-data-[stack=list]/table:items-baseline group-data-[stack=list]/table:gap-x-3 group-data-[stack=grid]/table:block group-data-[stack=grid]/table:before:block";
 
 /** Stacked layout without a label (an action column): the value takes the full row. */
 const UNLABELLED_CLASS = "group-data-[layout=stacked]/table:block";
@@ -349,7 +350,7 @@ export function TableHead({ visuallyHidden, ...props }: CellProps & { visuallyHi
     <BaseTableHead
       role="columnheader"
       scope="col"
-      className={cn(cellClass(props), "text-foreground")}
+      className={cn(cellClass(props), "text-title-small text-on-surface-variant")}
       {...cellData(props)}
     >
       {content}
@@ -400,7 +401,7 @@ export interface ResponsiveTableProps {
   layout?: TableLayoutMode;
 }
 
-/** The bordered card, the table element, and the table-or-stacked switch. */
+/** The outlined container, the table element, and the table-or-stacked switch. */
 export function ResponsiveTable({ children, caption, layout = "auto" }: ResponsiveTableProps) {
   const { wrapperRef, tableRef, layout: rendered, arrangement } = useTableLayout(layout);
   return (

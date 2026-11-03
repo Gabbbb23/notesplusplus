@@ -1,8 +1,9 @@
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
+import { Ripple } from "@/components/ui/ripple"
 import { FOCUS_RING } from "@/lib/focus-ring"
 import { cn } from "@/lib/utils"
-import { Tabs as TabsPrimitive } from "radix-ui"
+import { Slot, Tabs as TabsPrimitive } from "radix-ui"
 
 function Tabs({
   className,
@@ -23,24 +24,29 @@ function Tabs({
   )
 }
 
+/*
+ * M3 tabs: a row of 48px tabs over an outline-variant divider. "primary" marks the active tab with
+ * primary text and a 3px primary indicator under its label, rounded on top; "secondary" with on-surface
+ * text and a 2px indicator the full width of the tab.
+ */
 const tabsListVariants = cva(
-  "group/tabs-list inline-flex w-fit items-center justify-center rounded-lg p-[3px] text-muted-foreground group-data-[orientation=horizontal]/tabs:h-9 group-data-[orientation=vertical]/tabs:h-fit group-data-[orientation=vertical]/tabs:flex-col data-[variant=line]:rounded-none",
+  "group/tabs-list inline-flex items-stretch text-on-surface-variant group-data-[orientation=horizontal]/tabs:h-12 group-data-[orientation=horizontal]/tabs:w-full group-data-[orientation=horizontal]/tabs:border-b group-data-[orientation=horizontal]/tabs:border-outline-variant group-data-[orientation=vertical]/tabs:h-fit group-data-[orientation=vertical]/tabs:flex-col group-data-[orientation=vertical]/tabs:border-r group-data-[orientation=vertical]/tabs:border-outline-variant",
   {
     variants: {
       variant: {
-        default: "bg-muted",
-        line: "gap-1 bg-transparent",
+        primary: "",
+        secondary: "",
       },
     },
     defaultVariants: {
-      variant: "default",
+      variant: "primary",
     },
   }
 )
 
 function TabsList({
   className,
-  variant = "default",
+  variant = "primary",
   ...props
 }: React.ComponentProps<typeof TabsPrimitive.List> &
   VariantProps<typeof tabsListVariants>) {
@@ -56,21 +62,26 @@ function TabsList({
 
 function TabsTrigger({
   className,
+  children,
   ...props
 }: React.ComponentProps<typeof TabsPrimitive.Trigger>) {
   return (
     <TabsPrimitive.Trigger
       data-slot="tabs-trigger"
       className={cn(
-        "relative inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 rounded-md border border-transparent px-2 py-1 text-sm font-medium whitespace-nowrap text-foreground/60 transition-all group-data-[orientation=vertical]/tabs:w-full group-data-[orientation=vertical]/tabs:justify-start hover:text-foreground disabled:pointer-events-none disabled:opacity-50 group-data-[variant=default]/tabs-list:data-[state=active]:shadow-sm group-data-[variant=line]/tabs-list:data-[state=active]:shadow-none dark:text-muted-foreground dark:hover:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
-        "group-data-[variant=line]/tabs-list:bg-transparent group-data-[variant=line]/tabs-list:data-[state=active]:bg-transparent dark:group-data-[variant=line]/tabs-list:data-[state=active]:border-transparent dark:group-data-[variant=line]/tabs-list:data-[state=active]:bg-transparent",
-        "data-[state=active]:bg-background data-[state=active]:text-foreground dark:data-[state=active]:border-input dark:data-[state=active]:bg-input/30 dark:data-[state=active]:text-foreground",
-        "after:absolute after:bg-foreground after:opacity-0 after:transition-opacity group-data-[orientation=horizontal]/tabs:after:inset-x-0 group-data-[orientation=horizontal]/tabs:after:bottom-[-5px] group-data-[orientation=horizontal]/tabs:after:h-0.5 group-data-[orientation=vertical]/tabs:after:inset-y-0 group-data-[orientation=vertical]/tabs:after:-right-1 group-data-[orientation=vertical]/tabs:after:w-0.5 group-data-[variant=line]/tabs-list:data-[state=active]:after:opacity-100",
+        "relative inline-flex min-w-0 flex-1 cursor-pointer items-center justify-center gap-2 px-4 text-title-small whitespace-nowrap text-on-surface-variant transition-colors duration-200 ease-standard select-none group-data-[orientation=horizontal]/tabs:h-12 group-data-[orientation=vertical]/tabs:h-12 group-data-[orientation=vertical]/tabs:w-full group-data-[orientation=vertical]/tabs:justify-start disabled:pointer-events-none disabled:text-on-surface/38 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-6",
+        "group-data-[variant=primary]/tabs-list:data-[state=active]:text-primary group-data-[variant=secondary]/tabs-list:data-[state=active]:text-on-surface",
+        "after:pointer-events-none after:absolute after:bg-primary after:opacity-0 after:transition-opacity after:duration-200 data-[state=active]:after:opacity-100",
+        "group-data-[orientation=horizontal]/tabs:after:bottom-0 group-data-[variant=primary]/tabs-list:group-data-[orientation=horizontal]/tabs:after:inset-x-4 group-data-[variant=primary]/tabs-list:group-data-[orientation=horizontal]/tabs:after:h-[3px] group-data-[variant=primary]/tabs-list:group-data-[orientation=horizontal]/tabs:after:rounded-t-full group-data-[variant=secondary]/tabs-list:group-data-[orientation=horizontal]/tabs:after:inset-x-0 group-data-[variant=secondary]/tabs-list:group-data-[orientation=horizontal]/tabs:after:h-0.5",
+        "group-data-[orientation=vertical]/tabs:after:inset-y-0 group-data-[orientation=vertical]/tabs:after:right-0 group-data-[orientation=vertical]/tabs:after:w-[3px] group-data-[orientation=vertical]/tabs:after:rounded-l-full",
         FOCUS_RING,
         className
       )}
       {...props}
-    />
+    >
+      <Slot.Slottable>{children}</Slot.Slottable>
+      <Ripple disabled={props.disabled} />
+    </TabsPrimitive.Trigger>
   )
 }
 

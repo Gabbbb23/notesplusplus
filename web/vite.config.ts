@@ -41,5 +41,8 @@ export default defineConfig({
     css: false,
     // Page tests render whole pages in jsdom (the Tag page draws 93 cards); 5 s timed out when the laptop was busy.
     testTimeout: 15_000,
+    // @material/material-color-utilities 0.4 imports some of its own files without the .js extension, which
+    // only a bundler resolves, so the theme test (scripts/theme.ts) runs it through Vite instead of Node.
+    server: { deps: { inline: ["@material/material-color-utilities"] } },
   },
 });

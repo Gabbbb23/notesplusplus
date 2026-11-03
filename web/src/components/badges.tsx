@@ -2,16 +2,13 @@ import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { BreakableText } from "@/components/breakable-text";
 import { Badge } from "@/components/ui/badge";
+import { Ripple } from "@/components/ui/ripple";
 import { tagUrl } from "@/lib/api";
-import { cn } from "@/lib/utils";
 
 /*
- * Every badge in the app. This is the only module that imports the shadcn Badge.
- * Colours come from the --kind-* and --status-* tokens in index.css.
+ * Every badge in the app. This is the only module that imports the shadcn Badge, which draws the
+ * shape (a 24px label pill, 8px corners). Colours come from the kind-* and status-* tokens in index.css.
  */
-
-/** Shared look for label badges (kind, file type, status): small, uppercase, same letter-spacing. */
-const LABEL = "uppercase tracking-wide";
 
 export type Kind = "note" | "hub" | "source" | "file";
 
@@ -25,7 +22,7 @@ const KIND_CLASS: Record<Kind, string> = {
 /** Coloured pill naming what a thing is: note, hub, source, or file. */
 export function KindBadge({ kind }: { kind: Kind }) {
   return (
-    <Badge variant="secondary" data-kind={kind} className={cn(LABEL, KIND_CLASS[kind])}>
+    <Badge variant="secondary" data-kind={kind} className={KIND_CLASS[kind]}>
       {kind}
     </Badge>
   );
@@ -43,16 +40,16 @@ const STATUS_CLASS: Record<StatusTone, string> = {
 /** A short state or count: inbox text/binary, problem counts on the Check page. */
 export function StatusBadge({ tone = "neutral", children }: { tone?: StatusTone; children: ReactNode }) {
   return (
-    <Badge variant="secondary" data-tone={tone} className={cn(LABEL, STATUS_CLASS[tone])}>
+    <Badge variant="secondary" data-tone={tone} className={STATUS_CLASS[tone]}>
       {children}
     </Badge>
   );
 }
 
-/** A file's extension, e.g. PDF. Shows "?" for a file without one. */
+/** A file's extension, e.g. pdf. Shows "?" for a file without one. */
 export function FileTypeBadge({ ext }: { ext: string }) {
   return (
-    <Badge variant="secondary" className={cn(LABEL, STATUS_CLASS.neutral)}>
+    <Badge variant="secondary" className={STATUS_CLASS.neutral}>
       {ext || "?"}
     </Badge>
   );
@@ -65,37 +62,38 @@ export function FileTypeBadge({ ext }: { ext: string }) {
 export function TagName({ name }: { name: string }) {
   return (
     <span data-slot="tag-name" className="min-w-0 wrap-anywhere">
-      <span className="text-muted-foreground">#</span>
+      <span className="text-on-surface-variant">#</span>
       <BreakableText text={name} />
     </span>
   );
 }
 
 /**
- * The shadcn Badge is nowrap and never shrinks. A tag can be a long hyphenated name, so its
- * pill may shrink to the width of its container and wrap onto more lines. rounded-xl is a full
- * pill on one line and a rounded box on two.
+ * The outline Badge grown into an M3 assist chip: 32px tall, 16px side padding, label large. The Badge
+ * is nowrap and never shrinks, but a tag can be a long hyphenated name, so this chip may shrink to the
+ * width of its container and wrap onto more lines, growing taller from its 32px.
  */
-const TAG_BADGE_CLASS = "max-w-full min-w-0 shrink rounded-xl text-left font-normal whitespace-normal";
+const TAG_BADGE_CLASS = "min-h-8 max-w-full min-w-0 shrink px-4 py-1.5 text-left text-label-large whitespace-normal";
 
-/** One tag as a pill, "#name", linking to /tags/:tag. */
+/** One tag as an assist chip, "#name", linking to /tags/:tag. */
 export function TagBadge({ name }: { name: string }) {
   return (
     // The classes go on Badge, not the Link: Badge merges them over its own with tailwind-merge.
     <Badge variant="outline" asChild className={TAG_BADGE_CLASS}>
       <Link to={tagUrl(name)} data-slot="tag-badge">
-        {/* One flex child, so the badge's gap never separates "#" from the name. */}
+        {/* One flex child (the ripple is absolute), so the badge's gap never separates "#" from the name. */}
         <TagName name={name} />
+        <Ripple />
       </Link>
     </Badge>
   );
 }
 
-/** A row of tag pills. Renders nothing for an empty list. */
+/** A row of tag chips. Renders nothing for an empty list. */
 export function TagBadges({ tags }: { tags: string[] }) {
   if (tags.length === 0) return null;
   return (
-    <span data-slot="tag-badges" className="inline-flex max-w-full min-w-0 flex-wrap gap-1.5">
+    <span data-slot="tag-badges" className="inline-flex max-w-full min-w-0 flex-wrap gap-2">
       {tags.map((t) => (
         <TagBadge key={t} name={t} />
       ))}

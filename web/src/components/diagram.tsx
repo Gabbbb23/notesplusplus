@@ -6,6 +6,7 @@ import { LoadingBlock } from "@/components/page-state";
 import { useRenderPending } from "@/components/render-tracker";
 import { Button } from "@/components/ui/button";
 import { diagramThemeCss, diagramThemeVariables, readDiagramTokens } from "@/lib/diagram-theme";
+import { useColorScheme } from "@/lib/use-color-scheme";
 
 /*
  * Every mermaid diagram in the app. This is the only module that imports mermaid, and it does so
@@ -75,16 +76,18 @@ type DrawState =
 
 function SourceBlock({ id, source, hidden }: { id?: string; source: string; hidden?: boolean }) {
   return (
-    <pre id={id} hidden={hidden} data-slot="diagram-source" className="w-full text-foreground">
+    <pre id={id} hidden={hidden} data-slot="diagram-source" className="w-full text-on-surface">
       <code className="language-mermaid">{source}</code>
     </pre>
   );
 }
 
 /**
- * A fenced mermaid block drawn as a figure: the SVG scaled to the content width, then a quiet
- * "Show source" toggle that reveals the text. While mermaid loads, grey bars hold the space. When
- * the diagram cannot be drawn, a warning Notice gives the parser's first error line and the source.
+ * A fenced mermaid block drawn as a figure: the SVG scaled to the content width, then a text-button
+ * "Show source" toggle that reveals the text. While mermaid loads, placeholder bars hold the space.
+ * When the diagram cannot be drawn, a warning Notice gives the parser's first error line and the
+ * source. The colours come from the colour roles, so the diagram draws again when the system
+ * switches between light and dark; the drawing on screen stays until the new one is ready.
  *
  * `print` leaves out the toggle, for the print page. Inside a RenderTrackerProvider the diagram
  * counts as drawing until it is drawn or has failed.
@@ -94,6 +97,7 @@ export function Diagram({ source, print = false }: { source: string; print?: boo
   const sourceId = useId();
   const [drawn, setDrawn] = useState<DrawState | null>(null);
   const [showSource, setShowSource] = useState(false);
+  const scheme = useColorScheme();
 
   useEffect(() => {
     let live = true;
@@ -106,7 +110,8 @@ export function Diagram({ source, print = false }: { source: string; print?: boo
     return () => {
       live = false;
     };
-  }, [source]);
+    // drawDiagram reads the colour roles itself, so a new scheme only needs a new drawing.
+  }, [source, scheme]);
 
   // A result for an older source never shows.
   const state = drawn?.source === source ? drawn : null;
@@ -120,7 +125,7 @@ export function Diagram({ source, print = false }: { source: string; print?: boo
           <SourceBlock source={source} />
         </Notice>
       ) : (
-        <figure className="min-w-0 rounded-lg border bg-card p-4">
+        <figure className="min-w-0 rounded-medium border border-outline-variant bg-surface p-4">
           {state?.status === "ready" ? (
             <div
               data-slot="diagram-svg"
@@ -135,8 +140,8 @@ export function Diagram({ source, print = false }: { source: string; print?: boo
             <div className="mt-3 flex flex-col items-start gap-2">
               <Button
                 type="button"
-                variant="ghost"
-                size="sm"
+                variant="text"
+                size="small"
                 aria-expanded={showSource}
                 aria-controls={sourceId}
                 onClick={() => setShowSource((open) => !open)}

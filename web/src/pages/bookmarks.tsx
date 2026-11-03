@@ -1,22 +1,33 @@
-import { ArrowDownIcon, ArrowUpIcon, BookmarkIcon, EllipsisVerticalIcon, FolderIcon } from "lucide-react";
+import { ChevronDownIcon, FolderIcon } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link } from "react-router";
 import { toast } from "sonner";
 import { KindBadge } from "@/components/badges";
-import { NoteActionsMenu } from "@/components/note-actions-menu";
+import { ItemCard } from "@/components/item-card";
+import { GroupActionsMenu, NoteActionsMenu } from "@/components/note-actions-menu";
 import { PageHeader } from "@/components/page-header";
+import { EmptyState } from "@/components/page-state";
 import { ViewSwitch, type NoteView } from "@/components/view-switch";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { api } from "@/lib/api";
+import { Ripple } from "@/components/ui/ripple";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { api, noteUrl } from "@/lib/api";
+import { FOCUS_RING } from "@/lib/focus-ring";
 import type { BookmarkGroup, NoteSummary } from "@/lib/types";
 import { useAsync } from "@/lib/use-async";
+import { cn } from "@/lib/utils";
 
 type BookmarkSort = "manual" | "title" | "created" | "updated";
 type BookmarkPreferences = { view?: NoteView; sort?: BookmarkSort; openGroups?: string[] };
 
 const BOOKMARK_PREFERENCES_KEY = "notesplusplus.bookmarks.preferences";
+
+const SORT_OPTIONS: { value: BookmarkSort; label: string }[] = [
+  { value: "manual", label: "Manual order" },
+  { value: "title", label: "Title A to Z" },
+  { value: "created", label: "Recently added" },
+  { value: "updated", label: "Recently updated" },
+];
 
 function readBookmarkPreferences(): BookmarkPreferences {
   if (typeof window === "undefined") return {};
@@ -144,32 +155,49 @@ export function BookmarksPage() {
 
   return <>
     <PageHeader title="Bookmarks" tabTitle="Bookmarks" aside={`${orderedGroups.length} groups`}>
-      <form className="flex max-w-md gap-2" onSubmit={(event) => { event.preventDefault(); void createGroup(); }}>
+      <form className="flex max-w-md items-center gap-2" onSubmit={(event) => { event.preventDefault(); void createGroup(); }}>
         <Input value={newGroup} onChange={(event) => setNewGroup(event.target.value)} placeholder="New group name" aria-label="New bookmark group" />
         <Button type="submit" disabled={creating || !newGroup.trim()}>{creating ? "Creating" : "Create group"}</Button>
       </form>
     </PageHeader>
     <div className="mb-6 flex flex-wrap items-center justify-end gap-3">
-      <label className="flex items-center gap-2 text-sm text-muted-foreground">Sort
-        <select className="h-10 rounded-md border border-input bg-card px-3 text-foreground" value={sort} onChange={(event) => setSort(event.target.value as BookmarkSort)} aria-label="Sort bookmarks">
-          <option value="manual">Manual order</option><option value="title">Title A to Z</option><option value="created">Recently added</option><option value="updated">Recently updated</option>
-        </select>
-      </label>
+      <Select value={sort} onValueChange={(value) => { const option = SORT_OPTIONS.find((o) => o.value === value); if (option) setSort(option.value); }}>
+        <SelectTrigger size="chip" aria-label="Sort bookmarks">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {SORT_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+        </SelectContent>
+      </Select>
       <ViewSwitch value={view} onChange={setView} />
     </div>
-    {orderedGroups.length === 0 && <div className="rounded-lg border border-dashed p-8 text-center text-muted-foreground"><BookmarkIcon className="mx-auto mb-2 size-6" aria-hidden="true" />No bookmark groups yet.</div>}
-    <div className="space-y-3">
-      {orderedGroups.map((group) => {
+    {orderedGroups.length === 0 && <EmptyState>No bookmark groups yet.</EmptyState>}
+    {/* The groups as an M3 list: a 56px row per group that opens and closes it, dividers between groups. */}
+    <div className="divide-y divide-outline-variant">
+      {orderedGroups.map((group, groupIndex) => {
+        const name = group.name.replace(/-/g, " ");
         const groupNotes = sortNotes(group.slugs.flatMap((slug) => { const note = bySlug.get(slug); return note ? [note] : []; }), sort);
         const isOpen = openGroups.has(group.name);
-        return <section key={group.name} className="rounded-lg border bg-card">
-          <div className="flex items-center gap-2 px-3 py-2">
-            <button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left" aria-expanded={isOpen} onClick={() => setOpenGroups((current) => { const next = new Set(current); if (next.has(group.name)) next.delete(group.name); else next.add(group.name); return next; })}>
-              <FolderIcon className="size-4 text-muted-foreground" aria-hidden="true" /><span className="font-semibold">{group.name.replace(/-/g, " ")}</span><span className="text-sm text-muted-foreground">{groupNotes.length}</span>
+        return <section key={group.name}>
+          <div className="flex items-center gap-1 py-1">
+            <button type="button" className={cn("relative flex min-h-14 min-w-0 flex-1 cursor-pointer items-center gap-4 rounded-medium px-4 text-left text-on-surface", FOCUS_RING)} aria-expanded={isOpen} onClick={() => setOpenGroups((current) => { const next = new Set(current); if (next.has(group.name)) next.delete(group.name); else next.add(group.name); return next; })}>
+              <FolderIcon className="size-6 shrink-0 text-on-surface-variant" aria-hidden="true" />
+              <span className="min-w-0 text-title-medium wrap-break-word">{name}</span>
+              <span className="text-body-medium text-on-surface-variant">{groupNotes.length}</span>
+              <ChevronDownIcon className={cn("ml-auto size-6 shrink-0 text-on-surface-variant transition-transform duration-200 ease-standard", isOpen && "rotate-180")} aria-hidden="true" />
+              <Ripple />
             </button>
-            <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon-sm" aria-label={`More actions for ${group.name.replace(/-/g, " ")}`}><EllipsisVerticalIcon aria-hidden="true" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem disabled={orderedGroups.findIndex((entry) => entry.name === group.name) === 0} onSelect={() => void moveGroupByDirection(group.name, "up")}><ArrowUpIcon aria-hidden="true" />Move up</DropdownMenuItem><DropdownMenuItem disabled={orderedGroups.findIndex((entry) => entry.name === group.name) === orderedGroups.length - 1} onSelect={() => void moveGroupByDirection(group.name, "down")}><ArrowDownIcon aria-hidden="true" />Move down</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
+            <GroupActionsMenu name={name} index={groupIndex} count={orderedGroups.length} onMove={(direction) => void moveGroupByDirection(group.name, direction)} />
           </div>
-          {isOpen && <div className="border-t p-3">{groupNotes.length === 0 ? <p className="text-sm text-muted-foreground">No notes in this group.</p> : <div className={view === "tiles" ? "grid gap-3 sm:grid-cols-2" : "space-y-3"}>{groupNotes.map((note) => <article key={note.slug} className="min-w-0 rounded-lg border bg-card p-4 transition-colors hover:border-card-hover-border"><div className="flex items-start gap-2"><Link className="min-w-0 flex-1 break-words text-base font-medium text-link hover:text-link-hover" to={`/notes/${encodeURIComponent(note.slug)}`}>{note.title}</Link><KindBadge kind={note.type} /><NoteActionsMenu note={note} bookmarkOrder={sort === "manual" ? { group: group.name, index: group.slugs.indexOf(note.slug), count: group.slugs.length, onMove: (direction) => void moveNote(group.name, note.slug, direction) } : undefined} /></div>{view !== "tiles" && <p className="mt-1 text-sm text-muted-foreground">{note.summary}</p>}{view === "details" && <div className="mt-2 text-xs text-muted-foreground">updated {note.updated}</div>}{view === "content" && <div className="mt-2 text-sm">{note.summary}</div>}</article>)}</div>}</div>}
+          {isOpen && <div className="pb-4">{groupNotes.length === 0 ? <p className="px-4 text-body-medium text-on-surface-variant">No notes in this group.</p> : <div className={view === "tiles" ? "grid gap-2 medium:grid-cols-2" : "space-y-2"}>{groupNotes.map((note) => <ItemCard
+            key={note.slug}
+            title={{ text: note.title, to: noteUrl(note.slug) }}
+            badge={<KindBadge kind={note.type} />}
+            summary={view !== "tiles" ? note.summary || undefined : undefined}
+            snippet={view === "content" ? note.summary || undefined : undefined}
+            meta={view === "details" ? <span>updated {note.updated}</span> : undefined}
+            actions={<NoteActionsMenu note={note} bookmarkOrder={sort === "manual" ? { group: group.name, index: group.slugs.indexOf(note.slug), count: group.slugs.length, onMove: (direction) => void moveNote(group.name, note.slug, direction) } : undefined} />}
+          />)}</div>}</div>}
         </section>;
       })}
     </div>

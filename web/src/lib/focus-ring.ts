@@ -1,6 +1,7 @@
 /**
- * The one keyboard focus style: a solid 2px outline in the ring colour, 2px outside the element,
- * following its corners. It is `focus-visible`, so a mouse click on a button draws nothing.
+ * The one keyboard focus style, the M3 focus indicator: a solid 3px outline in the secondary role,
+ * 2px outside the element, following its corners. It is `focus-visible`, so a mouse click on a button
+ * draws nothing.
  *
  * Every interactive primitive in components/ui (button, input, select, textarea, toggle, toggle
  * group, tabs, the sheet's close button, badge links, breadcrumb links) and TextLink carry it.
@@ -11,4 +12,4 @@
  * outline style at none.
  */
 export const FOCUS_RING =
-  "focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
+  "focus-visible:outline-solid focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-secondary";

@@ -91,9 +91,9 @@ export function RecentNotes() {
       <div ref={listRef} className="space-y-4">
         {groupByDay(visible).map((group) => (
           <div key={group.date} className="space-y-2">
-            <h3 className="flex flex-wrap items-baseline gap-x-2 text-sm font-medium text-foreground">
+            <h3 className="flex flex-wrap items-baseline gap-x-2 text-title-small text-on-surface">
               {group.date}
-              <span className="font-normal text-muted-foreground">{dayDetail(group)}</span>
+              <span className="text-body-small text-on-surface-variant">{dayDetail(group)}</span>
             </h3>
             <CardList>
               {group.notes.map((note) => (

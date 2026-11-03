@@ -2,15 +2,21 @@ import * as React from "react"
 import { FOCUS_RING } from "@/lib/focus-ring"
 import { cn } from "@/lib/utils"
 
+/*
+ * The M3 outlined text field: 56px unless the caller sets a height, 4px corners, 16px side padding,
+ * body-large text. The 1px outline border turns on-surface on hover and 2px primary while focused (the
+ * border plus a 1px inset ring, so the text does not move); FOCUS_RING draws the keyboard outline too.
+ */
 function Input({ className, type, ...props }: React.ComponentProps<"input">) {
   return (
     <input
       type={type}
       data-slot="input"
       className={cn(
-        "h-9 w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] selection:bg-primary selection:text-primary-foreground file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm dark:bg-input/30",
+        "h-14 w-full min-w-0 rounded-extra-small border border-outline bg-transparent px-4 text-body-large text-on-surface caret-primary transition-[border-color,box-shadow] duration-200 ease-standard placeholder:text-on-surface-variant hover:border-on-surface focus-visible:border-primary focus-visible:inset-ring-1 focus-visible:inset-ring-primary disabled:pointer-events-none disabled:border-on-surface/12 disabled:text-on-surface/38 disabled:placeholder:text-on-surface/38",
+        "file:inline-flex file:h-8 file:border-0 file:bg-transparent file:text-label-large file:text-on-surface",
         FOCUS_RING,
-        "aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40",
+        "aria-invalid:border-error aria-invalid:caret-error aria-invalid:hover:border-on-error-container aria-invalid:focus-visible:border-error aria-invalid:focus-visible:inset-ring-error",
         className
       )}
       {...props}

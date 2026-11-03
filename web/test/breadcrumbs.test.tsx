@@ -49,7 +49,7 @@ describe("<Breadcrumbs>", () => {
     inRouter(<Breadcrumbs items={NESTED} />);
     for (const link of screen.getAllByRole("link")) {
       expect(link).toHaveAttribute("data-slot", "text-link");
-      expect(link).toHaveClass("text-muted-foreground", "hover:text-foreground", "hover:underline", "min-h-6");
+      expect(link).toHaveClass("text-on-surface-variant", "hover:text-on-surface", "hover:underline", "min-h-6");
       expect(link).not.toHaveClass("text-primary");
       expect(link).not.toHaveAttribute("target");
       expect(link).not.toHaveAttribute("aria-current");
@@ -58,11 +58,11 @@ describe("<Breadcrumbs>", () => {
     expect(hub.querySelector("[data-slot='breakable-text']")).not.toBeNull();
   });
 
-  it("uses small muted text in a wrapping row and never scrolls sideways", () => {
+  it("uses body-medium on-surface-variant text in a wrapping row and never scrolls sideways", () => {
     const { container } = inRouter(<Breadcrumbs items={NESTED} />);
     const list = container.querySelector("[data-slot='breadcrumb-list']")!;
-    expect(list).toHaveClass("flex-wrap", "text-muted-foreground", "text-[0.8125rem]/5", "gap-1", "sm:gap-1");
-    expect(list).not.toHaveClass("text-sm", "gap-1.5", "sm:gap-2.5");
+    expect(list).toHaveClass("flex-wrap", "text-body-medium", "text-on-surface-variant", "gap-1");
+    expect(list).not.toHaveClass("text-sm", "gap-1.5");
     expect(container.innerHTML).not.toMatch(/overflow-(?:x-)?(?:auto|scroll)|truncate|text-ellipsis/);
   });
 

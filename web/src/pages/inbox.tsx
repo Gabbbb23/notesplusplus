@@ -21,7 +21,7 @@ const columns: Column<InboxItem>[] = [
   {
     id: "modified",
     header: "Modified",
-    cell: (i) => <span className="text-muted-foreground">{formatTime(i.mtimeMs)}</span>,
+    cell: (i) => <span className="text-on-surface-variant">{formatTime(i.mtimeMs)}</span>,
   },
   {
     id: "kind",
@@ -60,13 +60,12 @@ function DropForm({ onAdded }: { onAdded: () => void }) {
 
   return (
     <SectionCard title="Drop text" description="Paste a transcript, notes, anything. Then ask the agent to file it.">
-      <form onSubmit={submit} className="space-y-3">
+      <form onSubmit={submit} className="space-y-4">
         <Input
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Name (optional, e.g. meeting-notes.md)"
           aria-label="Name"
-          className="bg-background"
         />
         <Textarea
           value={content}
@@ -74,7 +73,7 @@ function DropForm({ onAdded }: { onAdded: () => void }) {
           placeholder="Content"
           aria-label="Content"
           required
-          className="min-h-48 bg-background font-mono text-[0.85rem]"
+          className="min-h-48 font-mono text-body-medium"
         />
         {error && <ErrorAlert error={error} title="Could not add" />}
         <Button type="submit" disabled={busy}>

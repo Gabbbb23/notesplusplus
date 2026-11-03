@@ -20,7 +20,7 @@ function StatsStrip({ stats }: { stats: AsyncState<Stats> }) {
   if (error) return null;
   const value = (n: number | undefined) => (loading ? undefined : n);
   return (
-    <div className="mb-8 grid grid-cols-3 gap-3" aria-label="Stats">
+    <div className="mb-8 grid grid-cols-3 gap-2" aria-label="Stats">
       <StatCard label="notes" value={value(data?.notes)} to="/tags" />
       <StatCard label="files" value={value(data?.files)} to="/files" />
       <StatCard label="invalid" value={value(data?.invalid)} to="/check" warn={(data?.invalid ?? 0) > 0} />

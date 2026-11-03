@@ -104,7 +104,7 @@ export function SearchPage() {
     <>
       <PageHeader title="Search" tabTitle={q ? `Search: ${q}` : "Search"} breadcrumbs={TOP_LEVEL_CRUMBS} />
       <form onSubmit={submit} className="mb-8 space-y-4" role="search" aria-label="Search notes and files">
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
           <SearchInput
             value={draftQ}
             onChange={setDraftQ}
@@ -113,11 +113,9 @@ export function SearchPage() {
             autoFocus
             shortcutTarget="page"
           />
-          <Button type="submit" size="lg">
-            Search
-          </Button>
+          <Button type="submit">Search</Button>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
           <ToggleGroup
             type="single"
             variant="outline"
@@ -128,13 +126,13 @@ export function SearchPage() {
             aria-label="Search mode"
           >
             {MODES.map((m) => (
-              <ToggleGroupItem key={m.value} value={m.value} title={m.hint} className="bg-card px-3">
+              <ToggleGroupItem key={m.value} value={m.value} title={m.hint}>
                 {m.label}
               </ToggleGroupItem>
             ))}
           </ToggleGroup>
           <Select value={draftTag || ANY} onValueChange={(v) => setDraftTag(v === ANY ? "" : v)}>
-            <SelectTrigger className="bg-card" aria-label="Tag filter">
+            <SelectTrigger size="chip" aria-label="Tag filter">
               <SelectValue placeholder="Any tag" />
             </SelectTrigger>
             <SelectContent>
@@ -152,7 +150,7 @@ export function SearchPage() {
             </SelectContent>
           </Select>
           <Select value={draftType} onValueChange={setDraftType}>
-            <SelectTrigger className="bg-card" aria-label="Type filter">
+            <SelectTrigger size="chip" aria-label="Type filter">
               <SelectValue placeholder="Any type" />
             </SelectTrigger>
             <SelectContent>

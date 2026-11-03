@@ -163,7 +163,7 @@ describe("Search page", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Show more results" }));
 
     const cap = await screen.findByText("Showing the top 100. Refine the search to narrow it.");
-    expect(cap).toHaveClass("text-muted-foreground");
+    expect(cap).toHaveClass("text-on-surface-variant");
     expect(cards()).toHaveLength(100);
     expect(screen.getByTestId("location")).toHaveTextContent("/search?q=ryzen&n=100");
     expect(screen.queryByRole("button", { name: "Show more results" })).toBeNull();

@@ -11,7 +11,7 @@ export function SectionHeading({ children, ...rest }: HeadingProps & { children:
   return (
     <h2
       data-slot="section-heading"
-      className="border-b pb-1 text-xl leading-[1.3] font-semibold text-foreground wrap-break-word"
+      className="border-b border-outline-variant pb-1 text-title-large text-on-surface wrap-break-word"
       {...rest}
     >
       {children}

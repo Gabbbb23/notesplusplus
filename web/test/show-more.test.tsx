@@ -3,13 +3,13 @@ import { describe, expect, it, vi } from "vitest";
 import { ShowMore, ShowMoreLimit } from "../src/components/show-more";
 
 describe("<ShowMore>", () => {
-  it("is an outline button with the label and the progress text as its description", () => {
+  it("is an outlined button with the label and the progress text as its description", () => {
     const onClick = vi.fn();
     const { container } = render(
       <ShowMore label="Show more notes" loading={false} progress="Showing 50 of 93" onClick={onClick} />,
     );
     const button = screen.getByRole("button", { name: "Show more notes" });
-    expect(button).toHaveAttribute("data-variant", "outline");
+    expect(button).toHaveAttribute("data-variant", "outlined");
     expect(button).toBeEnabled();
     expect(button).not.toHaveAttribute("aria-busy");
     expect(button).toHaveAccessibleDescription("Showing 50 of 93");
@@ -29,7 +29,7 @@ describe("<ShowMore>", () => {
     expect(button).toBeDisabled();
     expect(button).toHaveAttribute("aria-busy", "true");
     expect(button.querySelectorAll("svg")).toHaveLength(1);
-    expect(button.querySelector("svg.animate-spin")).not.toBeNull();
+    expect(button.querySelector("svg.animate-spin")).toHaveClass("text-primary");
   });
 
   it("has no description without progress text", () => {
@@ -37,10 +37,10 @@ describe("<ShowMore>", () => {
     expect(screen.getByRole("button", { name: "Show more results" })).not.toHaveAttribute("aria-describedby");
   });
 
-  it("ShowMoreLimit is a muted line in the button's spot", () => {
+  it("ShowMoreLimit is an on-surface-variant line in the button's spot", () => {
     render(<ShowMoreLimit>Showing the top 100. Refine the search to narrow it.</ShowMoreLimit>);
     const line = screen.getByText("Showing the top 100. Refine the search to narrow it.");
     expect(line).toHaveAttribute("data-slot", "show-more-limit");
-    expect(line).toHaveClass("mt-4", "text-sm", "text-muted-foreground");
+    expect(line).toHaveClass("mt-4", "text-body-medium", "text-on-surface-variant");
   });
 });

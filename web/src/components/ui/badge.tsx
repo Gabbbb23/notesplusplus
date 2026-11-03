@@ -4,20 +4,21 @@ import { FOCUS_RING } from "@/lib/focus-ring"
 import { cn } from "@/lib/utils"
 import { Slot } from "radix-ui"
 
+/*
+ * A label pill: at least 24px (a minimum, so a tag chip can wrap and grow), 8px corners, 8px side
+ * padding, label-medium. badges.tsx sets the kind and status colours over the variant's.
+ */
 const badgeVariants = cva(
-  `inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-full border border-transparent px-2 py-0.5 text-xs font-medium whitespace-nowrap transition-[color,box-shadow] aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&>svg]:pointer-events-none [&>svg]:size-3 ${FOCUS_RING}`,
+  `relative inline-flex min-h-6 w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-small border border-transparent px-2 text-label-medium whitespace-nowrap transition-colors duration-200 ease-standard aria-invalid:border-error [&>svg]:pointer-events-none [&>svg]:size-3.5 ${FOCUS_RING}`,
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground [a&]:hover:bg-primary/90",
-        secondary:
-          "bg-secondary text-secondary-foreground [a&]:hover:bg-secondary/90",
-        destructive:
-          "bg-destructive text-white dark:bg-destructive/60 [a&]:hover:bg-destructive/90",
-        outline:
-          "border-border text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
-        ghost: "[a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
-        link: "text-link underline-offset-4 [a&]:hover:text-link-hover [a&]:hover:underline",
+        default: "bg-primary text-on-primary",
+        secondary: "bg-secondary-container text-on-secondary-container",
+        destructive: "bg-error text-on-error",
+        outline: "border-outline-variant text-on-surface-variant",
+        ghost: "text-on-surface-variant",
+        link: "text-primary underline-offset-4 [a&]:hover:underline",
       },
     },
     defaultVariants: {

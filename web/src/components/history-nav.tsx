@@ -157,18 +157,18 @@ export function useHistoryPosition(): HistoryPosition {
   return useContext(HistoryContext);
 }
 
-/** The Back and Forward buttons: ghost icon buttons, each disabled while it leads nowhere. */
+/** The Back and Forward buttons: standard icon buttons, each disabled while it leads nowhere. */
 export function HistoryNav({ className }: { className?: string }) {
   const { canBack, canForward } = useHistoryPosition();
   const navigate = useNavigate();
   return (
     <div role="group" aria-label="History" className={className}>
-      <Button type="button" variant="ghost" size="icon" aria-label="Back" title="Back" disabled={!canBack} onClick={() => navigate(-1)}>
+      <Button type="button" variant="standard" size="icon" aria-label="Back" title="Back" disabled={!canBack} onClick={() => navigate(-1)}>
         <ArrowLeftIcon aria-hidden="true" />
       </Button>
       <Button
         type="button"
-        variant="ghost"
+        variant="standard"
         size="icon"
         aria-label="Forward"
         title="Forward"

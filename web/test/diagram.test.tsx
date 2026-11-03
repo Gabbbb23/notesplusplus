@@ -40,12 +40,31 @@ function renderNote(markdown: string) {
 
 const svgIn = (root: ParentNode) => root.querySelector("[data-slot='diagram-svg'] svg");
 
-beforeAll(() => {
-  // The tokens the theme reads, as index.css defines them.
-  const style = document.createElement("style");
-  style.textContent = ":root { --foreground: #202124; --muted-foreground: #5f6368; --border: #dadce0; --card: #ffffff; --primary: #1a73e8; }";
-  document.head.append(style);
-});
+/** The colour roles the theme reads, as theme.css defines them for the light scheme and the dark one. */
+const LIGHT = {
+  "--md-sys-color-on-surface": "#1a1b20",
+  "--md-sys-color-on-surface-variant": "#44474f",
+  "--md-sys-color-outline-variant": "#c4c6d0",
+  "--md-sys-color-surface": "#f9f9ff",
+  "--md-sys-color-surface-container": "#ededf4",
+  "--md-sys-color-primary": "#435e91",
+  "--md-sys-color-on-primary": "#ffffff",
+  "--md-sys-color-primary-container": "#d8e2ff",
+  "--md-sys-color-on-primary-container": "#2a4678",
+};
+const DARK = {
+  ...LIGHT,
+  "--md-sys-color-on-surface": "#e2e2e9",
+  "--md-sys-color-surface": "#111318",
+  "--md-sys-color-primary": "#adc7ff",
+  "--md-sys-color-on-primary": "#0f2f60",
+};
+
+function setRoles(roles: Record<string, string>) {
+  for (const [property, value] of Object.entries(roles)) document.documentElement.style.setProperty(property, value);
+}
+
+beforeAll(() => setRoles(LIGHT));
 
 afterEach(() => {
   mermaid.initialize.mockClear();
@@ -97,7 +116,7 @@ describe("<Diagram> in a note body", () => {
       themeVariables: Record<string, string>;
       themeCSS: string;
     };
-    expect(themeVariables).toMatchObject({ textColor: "#202124", lineColor: "#5f6368", mainBkg: "#ffffff", primaryColor: "#1a73e8" });
+    expect(themeVariables).toMatchObject({ textColor: "#1a1b20", lineColor: "#44474f", mainBkg: "#ededf4", primaryColor: "#435e91" });
     expect(themeCSS).toContain(".eventWrapper");
 
     // The other code block is still a code block.
@@ -184,6 +203,56 @@ describe("<Diagram> in a note body", () => {
   });
 });
 
+describe("<Diagram> and the system colour scheme", () => {
+  /** A matchMedia whose dark query can be switched, as Windows does when the theme changes. */
+  function stubColorScheme() {
+    let dark = false;
+    const listeners = new Set<() => void>();
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      get matches() {
+        return query === "(prefers-color-scheme: dark)" && dark;
+      },
+      media: query,
+      addEventListener: (_type: string, listener: () => void) => listeners.add(listener),
+      removeEventListener: (_type: string, listener: () => void) => listeners.delete(listener),
+    }));
+    return (next: boolean) => {
+      dark = next;
+      listeners.forEach((listener) => listener());
+    };
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    setRoles(LIGHT);
+  });
+
+  it("draws again with the dark roles when the system switches to dark, keeping the drawing meanwhile", async () => {
+    const setDark = stubColorScheme();
+    const { container } = renderNote(fence("mermaid", TIMELINE));
+    await waitFor(() => expect(svgIn(container)).not.toBeNull());
+    expect(mermaid.render).toHaveBeenCalledTimes(1);
+    const firstId = svgIn(container)!.id;
+
+    let finish: (value: { svg: string }) => void = () => {};
+    mermaid.render.mockImplementationOnce(
+      (id: string) => new Promise((resolve) => (finish = () => resolve({ svg: `<svg id="${id}"><text>dark</text></svg>` }))),
+    );
+    setRoles(DARK);
+    act(() => setDark(true));
+
+    await waitFor(() => expect(mermaid.render).toHaveBeenCalledTimes(2));
+    // The light drawing stays, and nothing counts as loading, until the dark one is ready.
+    expect(svgIn(container)).toHaveAttribute("id", firstId);
+    expect(container.querySelector("[data-slot='diagram']")).toHaveAttribute("data-state", "ready");
+
+    await act(async () => finish({ svg: "" }));
+    await waitFor(() => expect(svgIn(container)).not.toHaveAttribute("id", firstId));
+    const { themeVariables } = mermaid.initialize.mock.calls.at(-1)![0] as { themeVariables: Record<string, string> };
+    expect(themeVariables).toMatchObject({ textColor: "#e2e2e9", background: "#111318", primaryColor: "#adc7ff", cScaleLabel0: "#0f2f60" });
+  });
+});
+
 describe("diagram helpers", () => {
   it("firstErrorLine takes the first non-empty line", () => {
     expect(firstErrorLine(new Error("\n  Parse error on line 3:\nmore"))).toBe("Parse error on line 3:");
@@ -191,28 +260,40 @@ describe("diagram helpers", () => {
     expect(firstErrorLine(new Error(""))).toBe("Unknown error");
   });
 
-  it("reads the theme from the CSS tokens", () => {
+  it("reads the theme from the M3 colour roles", () => {
     const tokens = readDiagramTokens(document.documentElement, document.body);
-    expect(tokens).toMatchObject({ text: "#202124", mutedText: "#5f6368", border: "#dadce0", card: "#ffffff", primary: "#1a73e8" });
-    const vars = diagramThemeVariables({ ...tokens, fontFamily: "Google Sans" });
-    expect(vars).toMatchObject({
-      background: "#ffffff",
-      primaryBorderColor: "#1a73e8",
-      nodeBorder: "#1a73e8",
-      primaryTextColor: "#202124",
-      gridColor: "#dadce0",
-      taskBkgColor: "#1a73e8",
-      fontFamily: "Google Sans",
+    expect(tokens).toMatchObject({
+      text: "#1a1b20",
+      mutedText: "#44474f",
+      border: "#c4c6d0",
+      surface: "#f9f9ff",
+      container: "#ededf4",
+      primary: "#435e91",
+      onPrimary: "#ffffff",
+      primaryContainer: "#d8e2ff",
+      onPrimaryContainer: "#2a4678",
     });
-    // Timeline periods: blue with card-coloured labels in every section slot.
-    expect(vars).toMatchObject({ cScale0: "#1a73e8", cScaleLabel0: "#ffffff", cScale11: "#1a73e8", cScaleLabel11: "#ffffff" });
+    const vars = diagramThemeVariables({ ...tokens, fontFamily: "Roboto" });
+    expect(vars).toMatchObject({
+      background: "#f9f9ff",
+      mainBkg: "#ededf4",
+      primaryBorderColor: "#435e91",
+      nodeBorder: "#435e91",
+      primaryTextColor: "#1a1b20",
+      gridColor: "#c4c6d0",
+      taskBkgColor: "#435e91",
+      taskTextColor: "#ffffff",
+      fontFamily: "Roboto",
+    });
+    // Timeline periods: primary with on-primary labels in every section slot.
+    expect(vars).toMatchObject({ cScale0: "#435e91", cScaleLabel0: "#ffffff", cScale11: "#435e91", cScaleLabel11: "#ffffff" });
     // Every variable is one of the tokens or the font, never a colour of its own.
-    const allowed = new Set([...Object.values(tokens), "Google Sans", "14px"]);
+    const allowed = new Set([...Object.values(tokens), "Roboto", "14px"]);
     expect(Object.values(vars).filter((v) => !allowed.has(v))).toEqual([]);
 
     const css = diagramThemeCss(tokens);
     expect(css).toContain(".eventWrapper { filter: none; }");
-    expect(css).toContain(".lineWrapper line { stroke: #5f6368; }");
+    expect(css).toContain(".lineWrapper line { stroke: #44474f; }");
     const colours = css.match(/#[0-9a-f]{3,8}\b/gi) ?? [];
     expect(colours.filter((c) => !Object.values(tokens).includes(c))).toEqual([]);
   });

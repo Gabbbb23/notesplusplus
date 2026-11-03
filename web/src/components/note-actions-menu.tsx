@@ -42,7 +42,7 @@ export interface NoteActionsMenuProps {
    * the `rowRemoved` callback from usePinnedListFocus, so focus moves to a neighbouring row.
    */
   onRemovedFromList?: () => void;
-  /** "default": a 32px button for cards and page headers. "small": 24px, for a sidebar link. */
+  /** "default": a 40px icon button for cards and page headers. "small": 32px, for a pinned row in the drawer. */
   size?: "default" | "small";
   bookmarkOrder?: { group: string; index: number; count: number; onMove: (direction: "up" | "down") => void };
 }
@@ -75,12 +75,12 @@ export function NoteActionsMenu({ note, pinnedList, onRemovedFromList, size = "d
         <Button
           ref={triggerRef}
           type="button"
-          variant="ghost"
-          size={size === "small" ? "icon-xs" : "icon-sm"}
+          variant="standard"
+          size={size === "small" ? "icon-small" : "icon"}
           data-slot={TRIGGER_SLOT}
           aria-label={`More actions for ${note.title}`}
         >
-          <EllipsisVerticalIcon aria-hidden="true" className="size-4 text-muted-foreground" />
+          <EllipsisVerticalIcon aria-hidden="true" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
@@ -167,6 +167,38 @@ export function NoteActionsMenu({ note, pinnedList, onRemovedFromList, size = "d
             </DropdownMenuItem>
           </DropdownMenuSubContent>
         </DropdownMenuSub>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+export interface GroupActionsMenuProps {
+  /** The group's name as shown, for the button's accessible name. */
+  name: string;
+  /** The group's place in the list: Move up is disabled for the first, Move down for the last. */
+  index: number;
+  count: number;
+  onMove: (direction: "up" | "down") => void;
+}
+
+/** The three-dot menu for one bookmark group on the Bookmarks page: Move up and Move down. */
+export function GroupActionsMenu({ name, index, count, onMove }: GroupActionsMenuProps) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button type="button" variant="standard" size="icon" aria-label={`More actions for ${name}`}>
+          <EllipsisVerticalIcon aria-hidden="true" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem disabled={index === 0} onSelect={() => onMove("up")}>
+          <ArrowUpIcon aria-hidden="true" />
+          Move up
+        </DropdownMenuItem>
+        <DropdownMenuItem disabled={index === count - 1} onSelect={() => onMove("down")}>
+          <ArrowDownIcon aria-hidden="true" />
+          Move down
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );

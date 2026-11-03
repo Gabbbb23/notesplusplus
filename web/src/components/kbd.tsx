@@ -5,11 +5,12 @@ import type { ReactNode } from "react";
  */
 
 /**
- * The app's own font (a <kbd> defaults to monospace) at 12px medium, muted, on the card surface:
- * 20px tall, 6px side padding, a 1px border, and a 4px radius. No uppercase, shadow, or animation.
+ * The app's own font (a <kbd> defaults to monospace) in label-medium, on-surface-variant, on
+ * surface-container: 20px tall, 6px side padding, a 1px outline-variant border, and the extra-small
+ * corner. No uppercase, shadow, or animation.
  */
 const KBD_CLASS =
-  "inline-flex h-5 items-center rounded-sm border border-border bg-card px-1.5 font-sans text-xs leading-none font-medium text-muted-foreground";
+  "inline-flex h-5 items-center rounded-extra-small border border-outline-variant bg-surface-container px-1.5 font-sans text-label-medium text-on-surface-variant";
 
 /** One key, such as "Alt" or "K", written as it should read. */
 export function Kbd({ children }: { children: ReactNode }) {

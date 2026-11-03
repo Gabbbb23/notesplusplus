@@ -62,7 +62,11 @@ export function TagPage() {
         aside={count}
         description={tagInfo?.description || undefined}
       />
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3"><NoteListControls filters={filters} types={TAG_PAGE_TYPES} /><ViewSwitch value={view} onChange={setView} /></div>
+      <NoteListControls
+        filters={filters}
+        types={TAG_PAGE_TYPES}
+        trailing={<ViewSwitch value={view} onChange={setView} />}
+      />
       {notes.items === undefined && notes.loading && <LoadingCards count={3} />}
       {notes.items && (
         <div ref={listRef} aria-busy={notes.stale || undefined} className={notes.stale ? "opacity-60" : undefined}>

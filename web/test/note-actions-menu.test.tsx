@@ -73,10 +73,11 @@ afterEach(() => {
 });
 
 describe("<NoteActionsMenu> trigger", () => {
-  it("is a ghost icon button named after the note", async () => {
+  it("is a standard icon button named after the note", async () => {
     renderMenu();
     const button = trigger();
-    expect(button).toHaveAttribute("data-variant", "ghost");
+    expect(button).toHaveAttribute("data-variant", "standard");
+    expect(button).toHaveAttribute("data-size", "icon");
     expect(button).toHaveAttribute("aria-haspopup", "menu");
     expect(button).toHaveTextContent("");
     expect(button.querySelector("svg")).toHaveAttribute("aria-hidden", "true");

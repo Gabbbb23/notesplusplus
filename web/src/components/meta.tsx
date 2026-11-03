@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 /*
- * Small muted details about a thing: tags, dates, paths, sources. Two shapes, one module:
+ * Small details about a thing: tags, dates, paths, sources. Two shapes, one module:
  * MetaList is a label and value grid (a note's header), MetaRow is one wrapping line (a card,
  * the Home hub). Both wrap long values instead of widening the page.
  */
@@ -9,7 +9,7 @@ import type { ReactNode } from "react";
 /** A grid of labelled details. Children are MetaItem. */
 export function MetaList({ children }: { children: ReactNode }) {
   return (
-    <dl data-slot="meta-list" className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm text-muted-foreground">
+    <dl data-slot="meta-list" className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-4 gap-y-2 text-body-medium">
       {children}
     </dl>
   );
@@ -19,16 +19,16 @@ export function MetaList({ children }: { children: ReactNode }) {
 export function MetaItem({ label, children }: { label: string; children: ReactNode }) {
   return (
     <>
-      <dt>{label}</dt>
+      <dt className="text-label-medium text-on-surface-variant">{label}</dt>
       <dd className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 wrap-break-word">{children}</dd>
     </>
   );
 }
 
-/** One wrapping line of small muted details, such as tags and an updated date. */
+/** One wrapping line of small on-surface-variant details, such as tags and an updated date. */
 export function MetaRow({ children }: { children: ReactNode }) {
   return (
-    <div data-slot="meta-row" className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground wrap-break-word">
+    <div data-slot="meta-row" className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 text-body-small text-on-surface-variant wrap-break-word">
       {children}
     </div>
   );

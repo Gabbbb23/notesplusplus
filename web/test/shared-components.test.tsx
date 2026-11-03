@@ -20,8 +20,7 @@ describe("<TextLink>", () => {
     const link = screen.getByRole("link", { name: "fields-cloud-hosting-budget-v2" });
     expect(link).toHaveAttribute("href", "/notes/fields-cloud-hosting-budget-v2");
     expect(link).not.toHaveAttribute("target");
-    expect(link).toHaveClass("text-link", "hover:text-link-hover", "hover:underline");
-    expect(link).not.toHaveClass("text-primary");
+    expect(link).toHaveClass("text-primary", "hover:underline");
     expect(link.querySelector("[data-slot='breakable-text'] wbr")).not.toBeNull();
     expect(link.querySelector("[data-slot='external-link-icon']")).toBeNull();
   });
@@ -34,7 +33,7 @@ describe("<TextLink>", () => {
     expect(link.querySelectorAll("[data-slot='external-link-icon']")).toHaveLength(1);
   });
 
-  it("applies the variant's weight", () => {
+  it("applies the variant's weight and type role", () => {
     inRouter(
       <>
         <TextLink to="/a" variant="strong">
@@ -46,10 +45,10 @@ describe("<TextLink>", () => {
       </>,
     );
     expect(screen.getByRole("link", { name: "a" })).toHaveClass("font-medium");
-    expect(screen.getByRole("link", { name: "b" })).toHaveClass("font-medium", "text-base");
+    expect(screen.getByRole("link", { name: "b" })).toHaveClass("text-title-medium");
   });
 
-  it("muted is quiet: grey until hover, a 24px hit area, and the same focus ring", () => {
+  it("muted is quiet: on-surface-variant until hover, a 24px hit area, and the same focus ring", () => {
     inRouter(
       <TextLink to="/" variant="muted">
         Home
@@ -57,22 +56,28 @@ describe("<TextLink>", () => {
     );
     const link = screen.getByRole("link", { name: "Home" });
     expect(link).toHaveClass(
-      "text-muted-foreground",
-      "hover:text-foreground",
+      "text-on-surface-variant",
+      "hover:text-on-surface",
       "hover:underline",
       "min-h-6",
       "py-0.5",
-      "focus-visible:outline-2",
+      "focus-visible:outline-3",
       "focus-visible:outline-offset-2",
-      "focus-visible:outline-ring",
+      "focus-visible:outline-secondary",
     );
-    expect(link).not.toHaveClass("text-link");
-    expect(link).not.toHaveClass("hover:text-link-hover");
+    expect(link).not.toHaveClass("text-primary");
   });
 });
 
 describe("tags", () => {
   const long = "fields-group-cloud-hosting-budget-proposal-for-the-2026-rollout";
+
+  it("TagBadge is an M3 assist chip: 32px, outline-variant border, label large, a state layer", () => {
+    inRouter(<TagBadge name="hardware" />);
+    const chip = screen.getByRole("link", { name: "#hardware" });
+    expect(chip).toHaveClass("min-h-8", "rounded-small", "border", "border-outline-variant", "px-4", "text-label-large", "relative");
+    expect(chip.querySelector("md-ripple")).not.toBeNull();
+  });
 
   it("TagBadge wraps: no nowrap, capped at its container, and break points in the name", () => {
     inRouter(<TagBadge name={long} />);
@@ -93,7 +98,7 @@ describe("tags", () => {
     const { container } = render(<TagName name="hardware" />);
     const name = container.querySelector("[data-slot='tag-name']")!;
     expect(name.textContent).toBe("#hardware");
-    expect(name.firstElementChild).toHaveClass("text-muted-foreground");
+    expect(name.firstElementChild).toHaveClass("text-on-surface-variant");
   });
 });
 
@@ -116,12 +121,12 @@ describe("<MetaList> and <MetaRow>", () => {
         <span>updated 2026-09-14</span>
       </MetaRow>,
     );
-    expect(container.querySelector("[data-slot='meta-row']")).toHaveClass("flex-wrap", "text-xs");
+    expect(container.querySelector("[data-slot='meta-row']")).toHaveClass("flex-wrap", "text-body-small", "text-on-surface-variant");
   });
 });
 
 describe("<Notice>", () => {
-  it("renders each tone with its title, description, and the card padding", () => {
+  it("renders each tone with its title, description, the card padding, and no border", () => {
     for (const tone of ["info", "success", "warning", "danger"] as const) {
       const { unmount } = render(
         <Notice tone={tone} title={`Title ${tone}`}>
@@ -130,8 +135,11 @@ describe("<Notice>", () => {
       );
       const alert = screen.getByRole("alert");
       expect(alert).toHaveAttribute("data-tone", tone);
-      expect(alert).toHaveClass("p-4", "rounded-lg");
+      expect(alert).toHaveClass("p-4", "rounded-medium");
+      expect(alert).not.toHaveClass("border");
       expect(alert).not.toHaveClass("py-3");
+      expect(alert.querySelector("[data-slot='alert-title']")).toHaveClass("text-title-small");
+      expect(alert.querySelector("[data-slot='alert-description']")).toHaveClass("text-body-medium");
       expect(alert.textContent).toContain(`Title ${tone}`);
       expect(alert.textContent).toContain(`Body ${tone}`);
       expect(alert.querySelector("svg")).not.toBeNull();
@@ -162,21 +170,20 @@ describe("<Notice>", () => {
 });
 
 describe("<Kbd> and <KbdGroup>", () => {
-  it("draws each key as a keycap in the app font, 20px tall, muted, on the card surface", () => {
+  it("draws each key as a keycap in the app font, 20px tall, label-medium, on surface-container", () => {
     render(<Kbd>Alt</Kbd>);
     const cap = screen.getByText("Alt");
     expect(cap.tagName).toBe("KBD");
     expect(cap).toHaveClass(
       "font-sans",
-      "text-xs",
-      "font-medium",
-      "text-muted-foreground",
+      "text-label-medium",
+      "text-on-surface-variant",
       "h-5",
       "px-1.5",
       "border",
-      "border-border",
-      "rounded-sm",
-      "bg-card",
+      "border-outline-variant",
+      "rounded-extra-small",
+      "bg-surface-container",
     );
     expect(cap.className).not.toMatch(/uppercase|shadow|font-mono|animate|transition/);
   });
@@ -201,7 +208,7 @@ describe("page pieces", () => {
     render(<SectionHeading id="backlinks-heading">Backlinks</SectionHeading>);
     const heading = screen.getByRole("heading", { level: 2, name: "Backlinks" });
     expect(heading).toHaveAttribute("id", "backlinks-heading");
-    expect(heading).toHaveClass("border-b", "text-xl");
+    expect(heading).toHaveClass("border-b", "text-title-large");
   });
 
   it("Callout renders its text", () => {
@@ -213,7 +220,16 @@ describe("page pieces", () => {
     const { container } = render(<SearchInput value="ryzen" onChange={() => {}} label="Search" shape="pill" />);
     const input = screen.getByRole("searchbox", { name: "Search" });
     expect(input).toHaveValue("ryzen");
-    expect(input).toHaveClass("rounded-full", "pl-9");
-    expect(container.querySelector("svg")).not.toBeNull();
+    // The M3 search bar: a borderless pill on surface-container-high, text clear of the 24px leading icon.
+    expect(input).toHaveClass("rounded-full", "border-0", "pl-14");
+    expect(container.querySelector("[data-slot='search-input']")).toHaveClass("rounded-full", "bg-surface-container-high");
+    expect(container.querySelector("svg")).toHaveClass("size-6");
+  });
+
+  it("SearchInput's box is the outlined text field with a leading icon", () => {
+    render(<SearchInput value="" onChange={() => {}} label="Filter notes" />);
+    const input = screen.getByRole("searchbox", { name: "Filter notes" });
+    expect(input).toHaveClass("h-14", "rounded-extra-small", "border", "border-outline", "pl-13");
+    expect(input).not.toHaveClass("rounded-full");
   });
 });

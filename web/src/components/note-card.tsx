@@ -50,7 +50,7 @@ export function NoteCard(props: NoteCardProps) {
 export function NoteList({ notes, empty = "Nothing here yet.", view = "list" }: { notes: NoteSummary[]; empty?: string; view?: NoteView }) {
   if (notes.length === 0) return <EmptyState>{empty}</EmptyState>;
   return (
-    <div className={view === "tiles" ? "grid gap-3 sm:grid-cols-2" : "space-y-3"} data-view={view}>
+    <div className={view === "tiles" ? "grid gap-2 medium:grid-cols-2" : "space-y-2"} data-view={view}>
       {notes.map((n) => (
         <NoteCard key={n.slug} note={n} compact={view === "tiles"} actions={<NoteActionsMenu note={n} />} />
       ))}

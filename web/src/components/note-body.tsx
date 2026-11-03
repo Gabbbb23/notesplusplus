@@ -91,7 +91,7 @@ const components: Components = {
     );
   },
   // Inline code holding one of the note's mentions (marked by rehype-local-paths.ts) becomes the
-  // path plus View, Open, and Show in folder. Other code, code blocks included, is unchanged.
+  // path plus Open and Show in folder. Other code, code blocks included, is unchanged.
   code(props) {
     const { children, node: _node, ...rest } = props;
     const localPath = (props as { "data-local-path"?: string })["data-local-path"];
@@ -247,7 +247,7 @@ export function SourceBody({ text }: { text: string }) {
   return (
     <pre
       data-slot="source-body"
-      className="whitespace-pre-wrap break-words rounded-lg border bg-muted p-4 font-mono text-[0.85rem] leading-relaxed"
+      className="rounded-medium bg-surface-container px-4 py-3 font-mono text-body-medium wrap-break-word whitespace-pre-wrap text-on-surface"
     >
       {text}
     </pre>

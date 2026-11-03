@@ -8,6 +8,14 @@ import { TextLink } from "../src/components/text-link";
 import { BreadcrumbLink } from "../src/components/ui/breadcrumb";
 import { Button } from "../src/components/ui/button";
 import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogTitle,
+} from "../src/components/ui/dialog";
+import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
@@ -29,30 +37,39 @@ import { FOCUS_RING } from "../src/lib/focus-ring";
 import { readIndexCss } from "./contrast";
 
 /*
- * Guards the one keyboard focus style (DECISIONS.md, 2026-09-15): a 2px outline in the ring colour,
+ * Guards the one keyboard focus style, the M3 focus indicator: a 3px outline in the secondary role,
  * 2px outside the element, shown only for keyboard focus.
  */
 
 const RING_CLASSES = FOCUS_RING.split(" ");
 
+/**
+ * Menu items draw the same outline inside their edges, because the menu clips its overflow and would
+ * cut off an outline drawn 2px outside a full-width item.
+ */
+const MENU_ITEM_RING_CLASSES = [
+  ...RING_CLASSES.filter((cls) => cls !== "focus-visible:outline-offset-2"),
+  "focus-visible:-outline-offset-3",
+];
+
 /** The faint shadcn default this replaced: a 3px ring at half opacity. */
 const OLD_RING = /(?:^|\s)(?:focus-visible:|focus:)(?:ring-|border-ring)/;
 
-function expectFocusRing(element: HTMLElement) {
-  expect(element).toHaveClass(...RING_CLASSES);
+function expectFocusRing(element: HTMLElement, classes = RING_CLASSES) {
+  expect(element).toHaveClass(...classes);
   expect(element.className).not.toMatch(OLD_RING);
 }
 
 const inRouter = (ui: ReactNode) => render(<MemoryRouter>{ui}</MemoryRouter>);
 
 describe("FOCUS_RING", () => {
-  it("is a solid 2px outline in the ring colour with a 2px offset, for keyboard focus only", () => {
+  it("is a solid 3px outline in the secondary role with a 2px offset, for keyboard focus only", () => {
     expect(RING_CLASSES).toEqual(
       expect.arrayContaining([
         "focus-visible:outline-solid",
-        "focus-visible:outline-2",
+        "focus-visible:outline-3",
         "focus-visible:outline-offset-2",
-        "focus-visible:outline-ring",
+        "focus-visible:outline-secondary",
       ]),
     );
     expect(RING_CLASSES.every((cls) => cls.startsWith("focus-visible:"))).toBe(true);
@@ -62,7 +79,7 @@ describe("FOCUS_RING", () => {
     const css = readIndexCss().replace(/\/\*[\s\S]*?\*\//g, "");
     const rule = /(?:^|\n)\s*:focus-visible\s*\{([^}]*)\}/.exec(css);
     expect(rule, "a :focus-visible rule in index.css").not.toBeNull();
-    expect(rule![1]).toMatch(/outline:\s*2px solid var\(--ring\)/);
+    expect(rule![1]).toMatch(/outline:\s*3px solid var\(--md-sys-color-secondary\)/);
     expect(rule![1]).toMatch(/outline-offset:\s*2px/);
     // The old base rule drew outlines at half opacity.
     expect(css).not.toMatch(/outline-ring\/50/);
@@ -73,12 +90,12 @@ describe("every interactive primitive has the focus ring", () => {
   it("Button, in every variant, and as a link", () => {
     render(
       <>
-        {(["default", "destructive", "outline", "secondary", "ghost", "link"] as const).map((variant) => (
+        {(["filled", "tonal", "outlined", "text", "elevated", "standard"] as const).map((variant) => (
           <Button key={variant} variant={variant}>
             {variant}
           </Button>
         ))}
-        <Button asChild variant="outline">
+        <Button asChild variant="outlined">
           <a href="/">Back home</a>
         </Button>
       </>,
@@ -98,15 +115,23 @@ describe("every interactive primitive has the focus ring", () => {
     expectFocusRing(screen.getByRole("textbox", { name: "Content" }));
   });
 
-  it("Select trigger", () => {
+  it("Select trigger, as a text field and as a chip", () => {
     render(
-      <Select>
-        <SelectTrigger aria-label="Tag filter">
-          <SelectValue placeholder="Any tag" />
-        </SelectTrigger>
-      </Select>,
+      <>
+        <Select>
+          <SelectTrigger aria-label="Tag filter">
+            <SelectValue placeholder="Any tag" />
+          </SelectTrigger>
+        </Select>
+        <Select>
+          <SelectTrigger size="chip" aria-label="Sort">
+            <SelectValue placeholder="Title A to Z" />
+          </SelectTrigger>
+        </Select>
+      </>,
     );
     expectFocusRing(screen.getByRole("combobox", { name: "Tag filter" }));
+    expectFocusRing(screen.getByRole("combobox", { name: "Sort" }));
   });
 
   it("Toggle and ToggleGroup items", () => {
@@ -137,7 +162,7 @@ describe("every interactive primitive has the focus ring", () => {
     for (const tab of screen.getAllByRole("tab")) expectFocusRing(tab);
   });
 
-  it("the Sheet's close button, at full opacity while focused", () => {
+  it("the Sheet's close button, a standard icon button", () => {
     render(
       <Sheet open>
         <SheetContent>
@@ -148,7 +173,7 @@ describe("every interactive primitive has the focus ring", () => {
     );
     const close = screen.getByRole("button", { name: "Close" });
     expectFocusRing(close);
-    expect(close).toHaveClass("rounded-sm", "focus-visible:opacity-100");
+    expect(close).toHaveClass("size-10", "rounded-full", "text-on-surface-variant");
   });
 
   it("breadcrumb links, both the shared Breadcrumbs and the primitive", () => {
@@ -175,7 +200,7 @@ describe("every interactive primitive has the focus ring", () => {
     );
     for (const link of screen.getAllByRole("link")) {
       expectFocusRing(link);
-      expect(link).toHaveClass("rounded-sm");
+      expect(link).toHaveClass("rounded-extra-small");
     }
   });
 
@@ -198,7 +223,27 @@ describe("every interactive primitive has the focus ring", () => {
     const menu = await screen.findByRole("menu");
     const items = Array.from(menu.querySelectorAll<HTMLElement>("[role^='menuitem']"));
     expect(items).toHaveLength(4);
-    for (const item of items) expectFocusRing(item);
+    for (const item of items) expectFocusRing(item, MENU_ITEM_RING_CLASSES);
+  });
+
+  it("Dialog actions, the only controls in a basic dialog", () => {
+    render(
+      <Dialog open>
+        <DialogContent>
+          <DialogTitle>Delete group</DialogTitle>
+          <DialogDescription>Its bookmarks go back to Ungrouped.</DialogDescription>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="text">Cancel</Button>
+            </DialogClose>
+            <Button variant="text">Delete</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>,
+    );
+    const buttons = within(screen.getByRole("dialog", { name: "Delete group" })).getAllByRole("button");
+    expect(buttons.map((button) => button.textContent)).toEqual(["Cancel", "Delete"]);
+    for (const button of buttons) expectFocusRing(button);
   });
 
   it("tag pills (Badge links)", () => {

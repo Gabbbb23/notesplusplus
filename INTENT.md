@@ -12,7 +12,7 @@ One person, the owner, on one Windows laptop. No accounts, no sharing, no hostin
 
 ## Current focus
 
-Phase one shipped on 2026-09-14: store, index, REST API, MCP server, web view. Focus now is daily use with two domains in the brain, the Fields Group project and the owner's BSIT college subjects, and a web UI (React, Tailwind, shadcn, light Google-white theme) that makes notes easy to read, navigate, and search.
+Phase one shipped on 2026-09-14: store, index, REST API, MCP server, web view. Focus now is daily use with two domains in the brain, the Fields Group project and the owner's BSIT college subjects, and a web UI (React, Tailwind, shadcn primitives styled as Material 3, light and dark) that makes notes easy to read, navigate, and search.
 
 Beside the inbox there is a second way material arrives: folders outside the brain that already hold it, named in `TRACKED_PATHS`. Nothing watches them. `npm run unfiled` compares them against the brain on demand and lists the documents no note records, so the owner can say "I added a file" and the agent finds which one.
 
@@ -25,7 +25,7 @@ Phase one scope, for reference:
 - SQLite index rebuilt from disk: FTS5 for keywords, local embeddings (small model, in-process, sqlite-vec) for semantic search. No external API.
 - REST API is the core. A stdio MCP server wraps it for Claude Code and Codex. The MCP server also serves the conventions as a resource and the `file` and `garden` skills as prompts, so rules cannot drift from the code that enforces them.
 - The agent has full write control and does not ask for confirmation. Every write is auto-committed so anything can be undone.
-- Web UI: reads notes and writes only pins, plus an inbox drop box. Home (pins, stats, a Recent section of the newest notes by day, then the root hub), note view with breadcrumbs and backlinks, search with smart/keyword/semantic modes and paged results (Alt+K to focus), tags, files, link check. Notes render tables, mermaid diagrams, and callouts. A three-dot menu on every note, hub, and source pins it to Home or the sidebar and exports it as Markdown or PDF. Any file a note mentions can be opened in its default app or shown in File Explorer. React single-page app built with Vite, Tailwind, and shadcn, served by the same Node process on loopback only. Light theme only.
+- Web UI: reads notes and writes only pins, plus an inbox drop box. Home (pins, stats, a Recent section of the newest notes by day, then the root hub), note view with breadcrumbs and backlinks, search with smart/keyword/semantic modes and paged results (Alt+K to focus), tags, files, link check. Notes render tables, mermaid diagrams, and callouts. A three-dot menu on every note, hub, and source pins it to Home or the sidebar and exports it as Markdown or PDF. Any file a note mentions can be opened in its default app or shown in File Explorer. React single-page app built with Vite, Tailwind, and shadcn, served by the same Node process on loopback only. Material 3 throughout: colour roles generated as a light and a dark scheme from one source colour, following the Windows setting; the print page and PDF export stay light.
 - Notes stay short at the top: a summary of at most 240 characters, with lists of values in tables in the body.
 
 Done when: the owner can drop a transcript in the inbox, tell Claude Code to file it, and later find a specific fact from it through search in both the agent and the web UI.

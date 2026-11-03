@@ -153,6 +153,15 @@ describe("Home: Pinned", () => {
   });
 });
 
+/**
+ * The standard navigation drawer, shown from the expanded window class up. The rail renders the
+ * destinations again for the medium class; CSS shows one of them at a time, but jsdom applies no CSS.
+ */
+const drawer = () => document.querySelector<HTMLElement>("[data-slot='navigation-drawer']")!;
+const rail = () => document.querySelector<HTMLElement>("[data-slot='navigation-rail']")!;
+const mainNav = (root: HTMLElement) => within(root).getByRole("navigation", { name: "Main" });
+const topAppBar = () => document.querySelector<HTMLElement>("[data-slot='top-app-bar']")!;
+
 describe("Sidebar: Pinned", () => {
   const pinnedNav = (root: HTMLElement = document.body) => within(root).queryByRole("navigation", { name: "Pinned" });
 
@@ -160,7 +169,8 @@ describe("Sidebar: Pinned", () => {
     renderAt("/tags", { "/api/pins": () => reply(200, pinned([], [LONG, RIZAL, BUDGET])), "/api/tags": () => reply(200, []) });
 
     const nav = await screen.findByRole("navigation", { name: "Pinned" });
-    const main = screen.getByRole("navigation", { name: "Main" });
+    expect(drawer()).toContainElement(nav);
+    const main = mainNav(drawer());
     expect(main.compareDocumentPosition(nav) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     const links = within(nav).getAllByRole("link");
@@ -188,14 +198,15 @@ describe("Sidebar: Pinned", () => {
     const active = within(nav).getByRole("link", { name: RIZAL.title });
     const other = within(nav).getByRole("link", { name: BUDGET.title });
     expect(active).toHaveAttribute("aria-current", "page");
-    expect(active).toHaveClass("bg-sidebar-accent", "text-sidebar-accent-foreground");
+    expect(active).toHaveClass("bg-secondary-container", "text-on-secondary-container");
     expect(other).not.toHaveAttribute("aria-current");
-    expect(other).not.toHaveClass("bg-sidebar-accent");
+    expect(other).not.toHaveClass("bg-secondary-container");
+    expect(other).toHaveClass("text-on-surface-variant");
 
     // The same classes the page links use when theirs is the current page.
-    const tagsLink = within(screen.getByRole("navigation", { name: "Main" })).getByRole("link", { name: "Tags" });
+    const tagsLink = within(mainNav(drawer())).getByRole("link", { name: "Tags" });
     fireEvent.click(tagsLink);
-    await waitFor(() => expect(tagsLink).toHaveClass("bg-sidebar-accent", "text-sidebar-accent-foreground"));
+    await waitFor(() => expect(tagsLink).toHaveClass("bg-secondary-container", "text-on-secondary-container"));
   });
 
   it("shows nothing without sidebar pins", async () => {
@@ -213,7 +224,7 @@ describe("Sidebar: Pinned", () => {
     });
     await screen.findByRole("navigation", { name: "Pinned" });
 
-    fireEvent.click(screen.getByRole("button", { name: "Open menu" }));
+    fireEvent.click(within(topAppBar()).getByRole("button", { name: "Open menu" }));
     const sheet = await screen.findByRole("dialog");
     // Opening the menu focuses Close, as before pins, rather than the first pin's menu button.
     await waitFor(() => expect(within(sheet).getByRole("button", { name: "Close" })).toHaveFocus());
@@ -240,6 +251,76 @@ describe("Sidebar: Pinned", () => {
     expect(within(nav).getAllByRole("link").map((a) => a.textContent)).toEqual([BUDGET.title, RIZAL.title]);
     await settle();
     expect(callsTo(fetchMock, "PUT /api/pins/sidebar/order").map((c) => c.body)).toEqual([{ slugs: [BUDGET.slug, RIZAL.slug] }]);
+  });
+});
+
+describe("the navigation rail and drawers", () => {
+  const destinations = (nav: HTMLElement) => within(nav).getAllByRole("link").map((a) => [a.textContent, a.getAttribute("href")]);
+
+  it("shows the rail only at the medium window class and the drawer from expanded up, so one Main nav is exposed at a time", async () => {
+    renderAt("/tags", { "/api/pins": () => reply(200, pinned([], [RIZAL])), "/api/tags": () => reply(200, []) });
+    await screen.findByRole("navigation", { name: "Pinned" });
+
+    // `hidden` is display: none, which takes the inactive one out of the accessibility tree.
+    expect(rail()).toHaveClass("hidden", "medium:flex", "expanded:hidden");
+    expect(drawer()).toHaveClass("hidden", "expanded:flex");
+    expect(destinations(mainNav(rail()))).toEqual(destinations(mainNav(drawer())));
+    expect(destinations(mainNav(rail())).map(([label]) => label)).toEqual(["Home", "Search", "Tags", "Bookmarks", "Inbox", "Files", "Check"]);
+    // Pins stay in the drawers; the rail has only the destinations.
+    expect(within(rail()).queryByRole("navigation", { name: "Pinned" })).toBeNull();
+    // The compact top app bar's menu button hides once the rail, with its own, takes over.
+    expect(within(topAppBar()).getByRole("button", { name: "Open menu" })).toHaveClass("medium:hidden");
+  });
+
+  it("marks the current page in the rail with the indicator", async () => {
+    renderAt("/tags", { "/api/pins": () => reply(200, pinned([], [])), "/api/tags": () => reply(200, []) });
+    await screen.findByRole("heading", { level: 1, name: "Tags" });
+
+    const tags = within(mainNav(rail())).getByRole("link", { name: "Tags" });
+    const home = within(mainNav(rail())).getByRole("link", { name: "Home" });
+    expect(tags).toHaveAttribute("aria-current", "page");
+    expect(tags.firstElementChild).toHaveClass("bg-secondary-container", "text-on-secondary-container");
+    expect(home.firstElementChild).not.toHaveClass("bg-secondary-container");
+    await settle();
+  });
+
+  it("opens the modal drawer from the rail's menu button, and returns focus to that button on close", async () => {
+    renderAt("/tags", { "/api/pins": () => reply(200, pinned([], [RIZAL])), "/api/tags": () => reply(200, []) });
+    await screen.findByRole("navigation", { name: "Pinned" });
+
+    const button = within(rail()).getByRole("button", { name: "Open menu" });
+    act(() => button.focus());
+    fireEvent.click(button);
+    const sheet = await screen.findByRole("dialog");
+    expect(within(sheet).getByRole("navigation", { name: "Main" })).toBeInTheDocument();
+    expect(within(sheet).getByRole("navigation", { name: "Pinned" })).toBeInTheDocument();
+
+    fireEvent.keyDown(sheet, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(button).toHaveFocus());
+  });
+});
+
+describe("the top app bar", () => {
+  it("takes the surface-container colour once the page is scrolled", async () => {
+    renderAt("/tags", { "/api/pins": () => reply(200, pinned([], [])), "/api/tags": () => reply(200, []) });
+    await screen.findByRole("heading", { level: 1, name: "Tags" });
+    const bar = topAppBar();
+    expect(bar).toHaveClass("bg-surface");
+
+    try {
+      Object.defineProperty(window, "scrollY", { value: 120, configurable: true, writable: true });
+      fireEvent.scroll(window);
+      expect(bar).toHaveClass("bg-surface-container");
+      expect(bar).not.toHaveClass("bg-surface");
+
+      Object.defineProperty(window, "scrollY", { value: 0, configurable: true, writable: true });
+      fireEvent.scroll(window);
+      expect(bar).toHaveClass("bg-surface");
+    } finally {
+      Object.defineProperty(window, "scrollY", { value: 0, configurable: true, writable: true });
+    }
+    await settle();
   });
 });
 

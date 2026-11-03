@@ -9,14 +9,15 @@ import {
   contrastRatio,
   hexToRgb,
   readColourTokens,
-  readIndexCss,
+  readSchemes,
   relativeLuminance,
   type ClassColour,
+  type SchemeName,
 } from "./contrast";
 
 /*
- * Guards "Web UI meets WCAG AA contrast" (DECISIONS.md, 2026-09-15) against the real tokens in
- * src/index.css: text 4.5:1 (WCAG 1.4.3), control boundaries and focus indicators 3:1 (WCAG 1.4.11).
+ * Guards "Web UI meets WCAG AA contrast" (DECISIONS.md, 2026-09-15) against the M3 colour roles in
+ * src/theme.css, light and dark, as index.css maps them: text 4.5:1 (WCAG 1.4.3), control boundaries and focus indicators 3:1 (WCAG 1.4.11).
  * Notices and badges are rendered, so their checks follow the classes they actually use.
  */
 
@@ -71,76 +72,102 @@ describe("contrast helper", () => {
   });
 });
 
-describe("index.css tokens meet WCAG AA", () => {
-  const t = readColourTokens(readIndexCss());
-  const page = t.background!;
-  const card = t.card!;
+const SCHEMES = readSchemes();
+const SCHEME_NAMES = ["light", "dark"] as const satisfies readonly SchemeName[];
 
-  it("keeps the Google surfaces from DECISIONS.md", () => {
-    expect(t).toMatchObject({
-      background: "#f8f9fa",
-      card: "#ffffff",
-      border: "#dadce0",
-      foreground: "#202124",
-      "muted-foreground": "#5f6368",
-      primary: "#1a73e8",
-    });
+/** The surfaces text and controls sit on: the page, every container tone, and the drawer and cards. */
+const SURFACES = [
+  "surface",
+  "surface-container-lowest",
+  "surface-container-low",
+  "surface-container",
+  "surface-container-high",
+  "surface-container-highest",
+];
+
+describe.each(SCHEME_NAMES)("the %s scheme meets WCAG AA", (scheme) => {
+  const t = SCHEMES[scheme];
+
+  it("has every role index.css maps", () => {
+    for (const role of ["primary", "on-primary", "surface", "on-surface", "outline", "outline-variant", "inverse-surface"]) {
+      expect(t[role], role).toMatch(/^#[0-9a-f]{6}$/);
+    }
   });
 
   it.each([
-    ["link on the page", "link", page],
-    ["link on a card", "link", card],
-    ["hovered link on the page", "link-hover", page],
-    ["hovered link on a card", "link-hover", card],
-    ["muted text on the page", "muted-foreground", page],
-    ["muted text on a card", "muted-foreground", card],
-    ["body text on the page", "foreground", page],
-    ["an error notice on its card", "destructive", card],
-  ])("text: %s reaches 4.5:1", (_label, token, surface) => {
-    expect(contrastRatio(t[token]!, surface)).toBeGreaterThanOrEqual(TEXT);
+    ["primary"],
+    ["primary-container"],
+    ["secondary"],
+    ["secondary-container"],
+    ["tertiary"],
+    ["tertiary-container"],
+    ["error"],
+    ["error-container"],
+    ["success"],
+    ["success-container"],
+    ["warning"],
+    ["warning-container"],
+  ])("text: on-%s on %s", (role) => {
+    expect(contrastRatio(t[`on-${role}`]!, t[role]!)).toBeGreaterThanOrEqual(TEXT);
   });
 
-  it("text: white on a filled button reaches 4.5:1", () => {
-    expect(contrastRatio(t["primary-foreground"]!, t.primary!)).toBeGreaterThanOrEqual(TEXT);
+  it.each(SURFACES)("text: on-surface, on-surface-variant, and primary (links) on %s", (surface) => {
+    for (const fg of ["on-surface", "on-surface-variant", "primary"]) {
+      expect(contrastRatio(t[fg]!, t[surface]!), `${fg} on ${surface}`).toBeGreaterThanOrEqual(TEXT);
+    }
   });
 
-  it.each([
-    ["input border on a card", "input", card],
-    ["input border on the page", "input", page],
-    ["focus ring on the page", "ring", page],
-    ["focus ring on a card", "ring", card],
-  ])("non-text: %s reaches 3:1", (_label, token, surface) => {
-    expect(contrastRatio(t[token]!, surface)).toBeGreaterThanOrEqual(NON_TEXT);
+  it.each(SURFACES)("non-text: the outline (control boundary) and secondary (focus indicator) on %s", (surface) => {
+    for (const fg of ["outline", "secondary"]) {
+      expect(contrastRatio(t[fg]!, t[surface]!), `${fg} on ${surface}`).toBeGreaterThanOrEqual(NON_TEXT);
+    }
   });
 
-  it("links are darker than the button blue, which stays for filled buttons", () => {
-    expect(t.link).not.toBe(t.primary);
-    expect(relativeLuminance(t.link!)).toBeLessThan(relativeLuminance(t.primary!));
-    expect(relativeLuminance(t["link-hover"]!)).toBeLessThan(relativeLuminance(t.link!));
+  it("text: snackbars and tooltips on the inverse surface", () => {
+    expect(contrastRatio(t["inverse-on-surface"]!, t["inverse-surface"]!)).toBeGreaterThanOrEqual(TEXT);
+    expect(contrastRatio(t["inverse-primary"]!, t["inverse-surface"]!)).toBeGreaterThanOrEqual(TEXT);
   });
-});
 
-/** The contrast of a class colour, blended by its alpha, on an opaque background. */
-function ratioOn(fg: ClassColour, bg: ClassColour): number {
-  expect(bg.alpha, `${bg.token} is opaque`).toBe(1);
-  return contrastRatio(blend(fg.hex, bg.hex, fg.alpha), bg.hex);
-}
+  it("text: the nav drawer's active item, on-secondary-container on secondary-container", () => {
+    expect(contrastRatio(t["on-secondary-container"]!, t["secondary-container"]!)).toBeGreaterThanOrEqual(TEXT);
+  });
 
-describe("every tinted pair meets 4.5:1", () => {
-  const t = readColourTokens(readIndexCss());
-  const DESCRIPTION = "*:data-[slot=alert-description]:";
-
-  it("each --kind-* and --status-* text token on its own background", () => {
+  it("text: each kind and status token on its own background, and search hits", () => {
     const pairs = Object.keys(t)
       .filter((name) => /^(?:kind|status)-.+-fg$/.test(name))
       .map((fg) => [fg, fg.replace(/-fg$/, "-bg")] as const);
     // note, hub, source, file; neutral, success, warning, danger.
     expect(pairs).toHaveLength(8);
     for (const [fg, bg] of pairs) {
-      expect(t[bg], `--${bg}`).toBeDefined();
-      expect(contrastRatio(t[fg]!, t[bg]!), `--${fg} on --${bg}`).toBeGreaterThanOrEqual(TEXT);
+      expect(t[bg], bg).toBeDefined();
+      expect(contrastRatio(t[fg]!, t[bg]!), `${fg} on ${bg}`).toBeGreaterThanOrEqual(TEXT);
     }
+    expect(contrastRatio(t["on-mark"]!, t.mark!)).toBeGreaterThanOrEqual(TEXT);
   });
+
+  it("success stays green and warning stays orange", () => {
+    const [r, g, b] = hexToRgb(t.success!);
+    expect(g).toBeGreaterThan(r);
+    expect(g).toBeGreaterThan(b);
+    const [wr, wg, wb] = hexToRgb(t.warning!);
+    expect(wr).toBeGreaterThan(wg);
+    expect(wg).toBeGreaterThan(wb);
+  });
+});
+
+it("the dark scheme is dark and the light one light", () => {
+  expect(relativeLuminance(SCHEMES.light.surface!)).toBeGreaterThan(0.8);
+  expect(relativeLuminance(SCHEMES.dark.surface!)).toBeLessThan(0.05);
+});
+
+function ratioOn(fg: ClassColour, bg: ClassColour): number {
+  expect(bg.alpha, `${bg.token} is opaque`).toBe(1);
+  return contrastRatio(blend(fg.hex, bg.hex, fg.alpha), bg.hex);
+}
+
+describe.each(SCHEME_NAMES)("every tinted component meets 4.5:1 in the %s scheme", (scheme) => {
+  const t = SCHEMES[scheme];
+  const DESCRIPTION = "*:data-[slot=alert-description]:";
 
   it.each<NoticeTone>(["info", "success", "warning", "danger"])("the %s notice: title and body on its background", (tone) => {
     render(createElement(Notice, { tone, title: "Title" }, "Body"));
@@ -183,14 +210,5 @@ describe("every tinted pair meets 4.5:1", () => {
     const badge = container.querySelector<HTMLElement>("[data-slot='badge']")!;
     const bg = classColour(badge.className, "bg", t)!;
     expect(ratioOn(classColour(badge.className, "text", t)!, bg)).toBeGreaterThanOrEqual(TEXT);
-  });
-
-  it("success stays green and warning stays orange", () => {
-    const [r, g, b] = hexToRgb(t.success!);
-    expect(g).toBeGreaterThan(r);
-    expect(g).toBeGreaterThan(b);
-    const [wr, wg, wb] = hexToRgb(t["kind-source-fg"]!);
-    expect(wr).toBeGreaterThan(wg);
-    expect(wg).toBeGreaterThan(wb);
   });
 });

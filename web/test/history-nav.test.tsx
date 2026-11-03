@@ -48,8 +48,12 @@ function renderAt(path: string) {
 const location = () => screen.getByTestId("location").textContent;
 const back = () => screen.getByRole("button", { name: "Back" });
 const forward = () => screen.getByRole("button", { name: "Forward" });
-/** The sidebar's Home link (the Tags page's breadcrumbs hold another "Home"). */
-const homeLink = () => within(screen.getByRole("navigation", { name: "Main" })).getByRole("link", { name: "Home" });
+/**
+ * The navigation drawer's Home link (the Tags page's breadcrumbs hold another "Home", and the rail a
+ * third, which CSS hides at this window size but jsdom does not).
+ */
+const homeLink = () =>
+  within(document.querySelector<HTMLElement>("[data-slot='navigation-drawer']")!).getByRole("link", { name: "Home" });
 
 /** Give the page a height, a viewport and a scroll position, as a browser would have laid them out. */
 function layOut({ scrollHeight, innerHeight, scrollY }: { scrollHeight: number; innerHeight: number; scrollY: number }) {

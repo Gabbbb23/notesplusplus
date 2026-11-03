@@ -10,29 +10,23 @@ import { cn } from "@/lib/utils";
  * bodies. This is the only module that styles a link or draws the external-link icon.
  */
 
-/** Every variant: underline on hover, and the app's keyboard focus outline with a small radius. */
-const LINK_CLASS = `min-w-0 rounded-sm hover:underline ${FOCUS_RING}`;
-
-/**
- * The link blue of every link except the quiet wayfinding ones: --link, darker than the button blue
- * so it reaches 4.5:1 on the page and on cards, and one step darker again on hover.
- */
-const PRIMARY = "text-link hover:text-link-hover";
+/** Every variant: underline on hover, and the app's keyboard focus outline with soft corners. */
+const LINK_CLASS = `min-w-0 rounded-extra-small hover:underline ${FOCUS_RING}`;
 
 export type TextLinkVariant = "inline" | "strong" | "title" | "muted";
 
 const VARIANT_CLASS: Record<TextLinkVariant, string> = {
   /** Inherits the surrounding size and weight. */
-  inline: PRIMARY,
+  inline: "text-primary",
   /** Medium weight: a slug or tag that names the row it sits in. */
-  strong: `${PRIMARY} font-medium`,
+  strong: "text-primary font-medium",
   /** A card title. */
-  title: `${PRIMARY} text-base font-medium`,
+  title: "text-primary text-title-medium",
   /**
-   * Quiet wayfinding, such as a breadcrumb: muted text that turns foreground on hover, and a hit area at
-   * least 24px tall (padding only, no visual change).
+   * Quiet wayfinding, such as a breadcrumb: on-surface-variant text that turns on-surface on hover, and
+   * a hit area at least 24px tall (padding only, no visual change).
    */
-  muted: "inline-block min-h-6 py-0.5 text-muted-foreground hover:text-foreground",
+  muted: "inline-block min-h-6 py-0.5 text-on-surface-variant hover:text-on-surface",
 };
 
 /** Shown after an external link's text. Sits inline so it follows the last line of wrapped text. */

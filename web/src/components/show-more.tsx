@@ -22,8 +22,8 @@ export interface ShowMoreProps {
 }
 
 /**
- * An outline button under a list, and an optional progress text beside it that the button
- * names as its description. The icon swaps for a spinner while loading, so the button keeps its width.
+ * An outlined button under a list, and an optional progress text beside it that the button
+ * names as its description. The icon swaps for a primary spinner while loading, so the button keeps its width.
  */
 export function ShowMore({ label, loading, progress, onClick }: ShowMoreProps) {
   const progressId = useId();
@@ -32,17 +32,17 @@ export function ShowMore({ label, loading, progress, onClick }: ShowMoreProps) {
     <div data-slot="show-more" className={cn(SPACING, "flex flex-wrap items-center gap-x-3 gap-y-2")}>
       <Button
         type="button"
-        variant="outline"
+        variant="outlined"
         disabled={loading}
         aria-busy={loading || undefined}
         aria-describedby={progress ? progressId : undefined}
         onClick={onClick}
       >
-        <Icon aria-hidden="true" className={loading ? "animate-spin" : undefined} />
+        <Icon aria-hidden="true" className={loading ? "animate-spin text-primary" : undefined} />
         {label}
       </Button>
       {progress && (
-        <span id={progressId} className="text-sm text-muted-foreground">
+        <span id={progressId} className="text-body-medium text-on-surface-variant">
           {progress}
         </span>
       )}
@@ -50,10 +50,10 @@ export function ShowMore({ label, loading, progress, onClick }: ShowMoreProps) {
   );
 }
 
-/** A muted line in the button's place when a list stops growing at a cap: "Showing the top 100. ..." */
+/** An on-surface-variant line in the button's place when a list stops growing at a cap: "Showing the top 100. ..." */
 export function ShowMoreLimit({ children }: { children: ReactNode }) {
   return (
-    <p data-slot="show-more-limit" className={cn(SPACING, "text-sm text-muted-foreground")}>
+    <p data-slot="show-more-limit" className={cn(SPACING, "text-body-medium text-on-surface-variant")}>
       {children}
     </p>
   );

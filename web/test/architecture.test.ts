@@ -501,7 +501,7 @@ describe("architecture: one shared component per UI pattern", () => {
   });
 
   it("reads the colour tokens from index.css", () => {
-    for (const token of ["primary", "primary-hover", "muted-foreground", "status-danger-bg", "kind-hub-fg"]) {
+    for (const token of ["primary", "on-primary", "on-surface-variant", "status-danger-bg", "kind-hub-fg"]) {
       expect(COLOUR_TOKENS.has(token)).toBe(true);
     }
   });
@@ -730,28 +730,28 @@ note.title = "x";`)).toEqual([]);
     });
 
     it("colour classes passed to Button, Alert, or Badge", () => {
-      expect(flag(`<Button type="submit" className="bg-primary hover:bg-primary-hover">Go</Button>`)[0]).toMatch(
+      expect(flag(`<Button type="submit" className="bg-primary hover:bg-primary-container">Go</Button>`)[0]).toMatch(
         /restyles <Button> colours with bg-primary.*ui\/button/,
       );
-      expect(flag(`<Button className="h-10 hover:bg-muted">Go</Button>`)[0]).toMatch(/hover:bg-muted/);
-      expect(flag(`<Button className={cn("h-10", active && "text-destructive")}>Go</Button>`)[0]).toMatch(
-        /text-destructive/,
+      expect(flag(`<Button className="h-10 hover:bg-surface-container-high">Go</Button>`)[0]).toMatch(/hover:bg-surface-container-high/);
+      expect(flag(`<Button className={cn("h-10", active && "text-error")}>Go</Button>`)[0]).toMatch(
+        /text-error/,
       );
       expect(
-        flag(`<Button onClick={() => go(a > b)} variant="outline" className="border-primary/40">Go</Button>`)[0],
+        flag(`<Button onClick={() => go(a > b)} variant="outlined" className="border-primary/40">Go</Button>`)[0],
       ).toMatch(/border-primary\/40/);
-      expect(flag(`<Alert className="border-success/40 bg-success-tint text-success">x</Alert>`)[0]).toMatch(
+      expect(flag(`<Alert className="bg-success-container text-on-success-container">x</Alert>`)[0]).toMatch(
         /restyles <Alert> colours.*Notice/,
       );
-      expect(flag(`<Badge variant="secondary" className="bg-secondary text-foreground">x</Badge>`)[0]).toMatch(
+      expect(flag(`<Badge variant="secondary" className="bg-secondary-container text-on-surface">x</Badge>`)[0]).toMatch(
         /restyles <Badge> colours.*@\/components\/badges/,
       );
       // Layout and size classes are fine, and so are colours on other elements.
-      expect(flag(`<Button variant="ghost" size="icon" className="md:hidden">x</Button>`)).toEqual([]);
-      expect(flag(`<Button className="h-10 text-sm border-2">x</Button>`)).toEqual([]);
-      expect(flag(`<AlertTitle className="text-success">x</AlertTitle><div className="bg-card" />`)).toEqual([]);
+      expect(flag(`<Button variant="standard" size="icon" className="expanded:hidden">x</Button>`)).toEqual([]);
+      expect(flag(`<Button className="h-10 text-label-large border-2">x</Button>`)).toEqual([]);
+      expect(flag(`<AlertTitle className="text-success">x</AlertTitle><div className="bg-surface" />`)).toEqual([]);
       expect(flag(`<Badge className={cn(LABEL, KIND_CLASS[kind])}>x</Badge>`, "components/badges.tsx")).toEqual([]);
-      expect(flag(`<Alert className="bg-success-tint">x</Alert>`, "components/notice.tsx")).toEqual([]);
+      expect(flag(`<Alert className="bg-success-container">x</Alert>`, "components/notice.tsx")).toEqual([]);
     });
 
     it("a colour class added to a Button in any real source file", () => {
@@ -759,8 +759,8 @@ note.title = "x";`)).toEqual([]);
       const withButtons = scannedFiles().filter((f) => /<Button(?![\w.$])/.test(f.source));
       expect(withButtons.length).toBeGreaterThan(0);
       for (const file of withButtons) {
-        const source = file.source.replace(/<Button(?![\w.$])/, `<Button className="bg-destructive"`);
-        expect(flag(source, file.path).join("\n"), file.path).toMatch(/restyles <Button> colours with bg-destructive/);
+        const source = file.source.replace(/<Button(?![\w.$])/, `<Button className="bg-error"`);
+        expect(flag(source, file.path).join("\n"), file.path).toMatch(/restyles <Button> colours with bg-error/);
       }
     });
 

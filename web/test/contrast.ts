@@ -90,3 +90,39 @@ export function readColourTokens(css: string): Record<string, string> {
 export function readIndexCss(): string {
   return readFileSync(fileURLToPath(new NodeURL("../src/index.css", import.meta.url)), "utf8");
 }
+
+/** src/theme.css (the generated M3 colour roles) as text. */
+export function readThemeCss(): string {
+  return readFileSync(fileURLToPath(new NodeURL("../src/theme.css", import.meta.url)), "utf8");
+}
+
+export type SchemeName = "light" | "dark";
+
+/** The --md-sys-color-* roles of one block of theme.css, keyed without the prefix: { primary: "#435e91", ... }. */
+function systemRoles(block: string): Record<string, string> {
+  return Object.fromEntries(Array.from(block.matchAll(/--md-sys-color-([a-z0-9-]+)\s*:\s*(#[0-9a-f]{3,8})\s*;/gi), (m) => [m[1]!, m[2]!]));
+}
+
+/**
+ * The Tailwind colour names from index.css's @theme block, resolved to hex in each scheme of theme.css:
+ * { light: { primary: "#435e91", "kind-hub-bg": "#8bf7c4", ... }, dark: { ... } }.
+ */
+export function readSchemes(themeCss = readThemeCss(), indexCss = readIndexCss()): Record<SchemeName, Record<string, string>> {
+  const css = themeCss.replace(/\/\*[\s\S]*?\*\//g, "");
+  const light = /:root\s*\{([\s\S]*?)\n\}/.exec(css);
+  const dark = /@media \(prefers-color-scheme: dark\)\s*\{\s*:root[^{]*\{([\s\S]*?)\n\s*\}/.exec(css);
+  if (!light || !dark) throw new Error("theme.css needs a light :root block and a dark one under prefers-color-scheme");
+  const names = Array.from(
+    indexCss.matchAll(/--color-([a-z0-9-]+)\s*:\s*var\(--md-sys-color-([a-z0-9-]+)\)\s*;/g),
+    (m) => [m[1]!, m[2]!] as const,
+  );
+  const resolve = (roles: Record<string, string>) =>
+    Object.fromEntries(
+      names.map(([name, role]) => {
+        const hex = roles[role];
+        if (!hex) throw new Error(`--color-${name} names --md-sys-color-${role}, which theme.css does not define`);
+        return [name, hex];
+      }),
+    );
+  return { light: resolve(systemRoles(light[1]!)), dark: resolve(systemRoles(dark[1]!)) };
+}

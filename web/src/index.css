@@ -1,191 +1,237 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "./theme.css";
 
 /*
- * Light theme only. Google Material surfaces: an off-white page, white cards,
- * grey hairlines, and one blue accent. No dark mode.
+ * Material 3. The colour roles come from theme.css (generated, light and dark from one source colour);
+ * this file maps them, the M3 type scale, shape scale, elevation, motion, and window size classes onto
+ * Tailwind. Tailwind's own palette, text sizes, radii, shadows, and breakpoints are switched off, so a
+ * class can only name an M3 token. test/architecture.test.ts flags the old names.
  */
-:root {
-  --radius: 0.5rem;
-
-  --background: #f8f9fa;
-  --foreground: #202124;
-  --card: #ffffff;
-  --card-foreground: #202124;
-  --popover: #ffffff;
-  --popover-foreground: #202124;
-  /* Filled buttons: white text on blue. */
-  --primary: #1a73e8;
-  --primary-hover: #1967d2;
-  --primary-foreground: #ffffff;
-  /*
-   * Link text, one step darker than --primary so it reaches WCAG AA (4.5:1) on the page and on cards:
-   * 5.09:1 on #f8f9fa and 5.37:1 on white. Hover is one step darker again.
-   * test/contrast.test.ts checks these ratios.
-   */
-  --link: #1967d2;
-  --link-hover: #185abc;
-  --secondary: #f1f3f4;
-  --secondary-foreground: #202124;
-  --muted: #f1f3f4;
-  --muted-foreground: #5f6368;
-  --accent: #e8f0fe;
-  --accent-foreground: #1967d2;
-  --destructive: #d93025;
-  --destructive-foreground: #ffffff;
-  /*
-   * Google Green 800. Text in a success notice and on hub and success badges, on --success-tint:
-   * 5.24:1. Green 700 (#188038) gave 4.42:1.
-   */
-  --success: #137333;
-  --warning: #f9ab00;
-  /* Hairlines on cards, tables, and dividers. Not a control boundary, so no contrast minimum. */
-  --border: #dadce0;
-  /*
-   * The boundary of a form control (input, select, textarea, toggle): at least 3:1 against the
-   * surface it sits on, as WCAG 1.4.11 asks. 3.49:1 on #f8f9fa, 3.68:1 on white.
-   */
-  --input: #80868b;
-  /* The keyboard focus outline (lib/focus-ring.ts): 4.27:1 on #f8f9fa, 4.51:1 on white. */
-  --ring: #1a73e8;
-  --mark: #fef7c3;
-
-  /*
-   * Tinted pills and card accents. Badges and cards read these through Tailwind
-   * classes (bg-kind-hub-bg, bg-status-danger-bg, ...), so a palette change is made here only.
-   */
-  --success-tint: #e6f4ea;
-  --card-hover-border: #c4c7cb;
-
-  --kind-note-bg: var(--accent);
-  --kind-note-fg: var(--accent-foreground);
-  --kind-hub-bg: var(--success-tint);
-  --kind-hub-fg: var(--success);
-  --kind-source-bg: #fef7e0;
-  /*
-   * Warning text: a warning notice, source and warning badges. One step darker than Google Orange 900
-   * (#b06000, 4.34:1 on #fef7e0) on the same hue, to reach 5.18:1. test/contrast.test.ts checks every tint pair.
-   */
-  --kind-source-fg: #9e5600;
-  --kind-file-bg: #f3e8fd;
-  --kind-file-fg: #681da8;
-
-  --status-neutral-bg: var(--secondary);
-  --status-neutral-fg: var(--secondary-foreground);
-  --status-success-bg: var(--success-tint);
-  --status-success-fg: var(--success);
-  --status-warning-bg: var(--kind-source-bg);
-  --status-warning-fg: var(--kind-source-fg);
-  --status-danger-bg: var(--destructive);
-  --status-danger-fg: var(--destructive-foreground);
-
-  --sidebar: #ffffff;
-  --sidebar-foreground: #202124;
-  --sidebar-primary: #1a73e8;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #e8f0fe;
-  --sidebar-accent-foreground: #1967d2;
-  --sidebar-border: #dadce0;
-  --sidebar-ring: #1a73e8;
-}
-
 @theme inline {
+  --color-*: initial;
+  --text-*: initial;
+  --radius-*: initial;
+  --shadow-*: initial;
+  --breakpoint-*: initial;
+
   /*
    * Roboto ships inside the build (main.tsx imports @fontsource/roboto 400, 500, 700, and 400 italic),
-   * so the app looks the same on any machine and never fetches a font. Segoe UI stands in while it loads.
-   * Code uses the monospace fonts Windows already has.
+   * so the app looks the same on any machine and never fetches a font. Code uses the monospace fonts
+   * Windows already has.
    */
   --font-sans: Roboto, "Segoe UI", system-ui, sans-serif;
   --font-mono: Consolas, "Cascadia Mono", ui-monospace, Menlo, monospace;
 
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  /* Colour roles: bg-surface-container-low, text-on-surface-variant, border-outline-variant, ... */
+  --color-primary: var(--md-sys-color-primary);
+  --color-on-primary: var(--md-sys-color-on-primary);
+  --color-primary-container: var(--md-sys-color-primary-container);
+  --color-on-primary-container: var(--md-sys-color-on-primary-container);
+  --color-inverse-primary: var(--md-sys-color-inverse-primary);
+  --color-secondary: var(--md-sys-color-secondary);
+  --color-on-secondary: var(--md-sys-color-on-secondary);
+  --color-secondary-container: var(--md-sys-color-secondary-container);
+  --color-on-secondary-container: var(--md-sys-color-on-secondary-container);
+  --color-tertiary: var(--md-sys-color-tertiary);
+  --color-on-tertiary: var(--md-sys-color-on-tertiary);
+  --color-tertiary-container: var(--md-sys-color-tertiary-container);
+  --color-on-tertiary-container: var(--md-sys-color-on-tertiary-container);
+  --color-error: var(--md-sys-color-error);
+  --color-on-error: var(--md-sys-color-on-error);
+  --color-error-container: var(--md-sys-color-error-container);
+  --color-on-error-container: var(--md-sys-color-on-error-container);
+  --color-success: var(--md-sys-color-success);
+  --color-on-success: var(--md-sys-color-on-success);
+  --color-success-container: var(--md-sys-color-success-container);
+  --color-on-success-container: var(--md-sys-color-on-success-container);
+  --color-warning: var(--md-sys-color-warning);
+  --color-on-warning: var(--md-sys-color-on-warning);
+  --color-warning-container: var(--md-sys-color-warning-container);
+  --color-on-warning-container: var(--md-sys-color-on-warning-container);
+  --color-surface: var(--md-sys-color-surface);
+  --color-surface-dim: var(--md-sys-color-surface-dim);
+  --color-surface-bright: var(--md-sys-color-surface-bright);
+  --color-surface-container-lowest: var(--md-sys-color-surface-container-lowest);
+  --color-surface-container-low: var(--md-sys-color-surface-container-low);
+  --color-surface-container: var(--md-sys-color-surface-container);
+  --color-surface-container-high: var(--md-sys-color-surface-container-high);
+  --color-surface-container-highest: var(--md-sys-color-surface-container-highest);
+  --color-on-surface: var(--md-sys-color-on-surface);
+  --color-surface-variant: var(--md-sys-color-surface-variant);
+  --color-on-surface-variant: var(--md-sys-color-on-surface-variant);
+  --color-inverse-surface: var(--md-sys-color-inverse-surface);
+  --color-inverse-on-surface: var(--md-sys-color-inverse-on-surface);
+  --color-outline: var(--md-sys-color-outline);
+  --color-outline-variant: var(--md-sys-color-outline-variant);
+  --color-shadow: var(--md-sys-color-shadow);
+  --color-scrim: var(--md-sys-color-scrim);
 
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary);
-  --color-primary-hover: var(--primary-hover);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-link: var(--link);
-  --color-link-hover: var(--link-hover);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-destructive-foreground: var(--destructive-foreground);
-  --color-success: var(--success);
-  --color-warning: var(--warning);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
-  --color-mark: var(--mark);
-  --color-success-tint: var(--success-tint);
-  --color-card-hover-border: var(--card-hover-border);
+  /*
+   * App tokens built on the roles, so a badge or notice names what it shows, not a colour.
+   * test/contrast.test.ts checks every pair in both schemes.
+   */
+  --color-kind-note-bg: var(--md-sys-color-primary-container);
+  --color-kind-note-fg: var(--md-sys-color-on-primary-container);
+  --color-kind-hub-bg: var(--md-sys-color-success-container);
+  --color-kind-hub-fg: var(--md-sys-color-on-success-container);
+  --color-kind-source-bg: var(--md-sys-color-warning-container);
+  --color-kind-source-fg: var(--md-sys-color-on-warning-container);
+  --color-kind-file-bg: var(--md-sys-color-tertiary-container);
+  --color-kind-file-fg: var(--md-sys-color-on-tertiary-container);
+  --color-status-neutral-bg: var(--md-sys-color-surface-container-highest);
+  --color-status-neutral-fg: var(--md-sys-color-on-surface-variant);
+  --color-status-success-bg: var(--md-sys-color-success-container);
+  --color-status-success-fg: var(--md-sys-color-on-success-container);
+  --color-status-warning-bg: var(--md-sys-color-warning-container);
+  --color-status-warning-fg: var(--md-sys-color-on-warning-container);
+  --color-status-danger-bg: var(--md-sys-color-error-container);
+  --color-status-danger-fg: var(--md-sys-color-on-error-container);
+  /* Search hits inside a snippet or a note. */
+  --color-mark: var(--md-sys-color-warning-container);
+  --color-on-mark: var(--md-sys-color-on-warning-container);
 
-  --color-kind-note-bg: var(--kind-note-bg);
-  --color-kind-note-fg: var(--kind-note-fg);
-  --color-kind-hub-bg: var(--kind-hub-bg);
-  --color-kind-hub-fg: var(--kind-hub-fg);
-  --color-kind-source-bg: var(--kind-source-bg);
-  --color-kind-source-fg: var(--kind-source-fg);
-  --color-kind-file-bg: var(--kind-file-bg);
-  --color-kind-file-fg: var(--kind-file-fg);
+  /*
+   * The M3 type scale: text-display-large ... text-label-small. Each class sets size, line height,
+   * tracking, and weight together, so a weight class is rarely needed.
+   */
+  --text-display-large: 3.5625rem;
+  --text-display-large--line-height: 4rem;
+  --text-display-large--letter-spacing: -0.015625rem;
+  --text-display-large--font-weight: 400;
+  --text-display-medium: 2.8125rem;
+  --text-display-medium--line-height: 3.25rem;
+  --text-display-medium--letter-spacing: 0rem;
+  --text-display-medium--font-weight: 400;
+  --text-display-small: 2.25rem;
+  --text-display-small--line-height: 2.75rem;
+  --text-display-small--letter-spacing: 0rem;
+  --text-display-small--font-weight: 400;
+  --text-headline-large: 2rem;
+  --text-headline-large--line-height: 2.5rem;
+  --text-headline-large--letter-spacing: 0rem;
+  --text-headline-large--font-weight: 400;
+  --text-headline-medium: 1.75rem;
+  --text-headline-medium--line-height: 2.25rem;
+  --text-headline-medium--letter-spacing: 0rem;
+  --text-headline-medium--font-weight: 400;
+  --text-headline-small: 1.5rem;
+  --text-headline-small--line-height: 2rem;
+  --text-headline-small--letter-spacing: 0rem;
+  --text-headline-small--font-weight: 400;
+  --text-title-large: 1.375rem;
+  --text-title-large--line-height: 1.75rem;
+  --text-title-large--letter-spacing: 0rem;
+  --text-title-large--font-weight: 400;
+  --text-title-medium: 1rem;
+  --text-title-medium--line-height: 1.5rem;
+  --text-title-medium--letter-spacing: 0.009375rem;
+  --text-title-medium--font-weight: 500;
+  --text-title-small: 0.875rem;
+  --text-title-small--line-height: 1.25rem;
+  --text-title-small--letter-spacing: 0.00625rem;
+  --text-title-small--font-weight: 500;
+  --text-body-large: 1rem;
+  --text-body-large--line-height: 1.5rem;
+  --text-body-large--letter-spacing: 0.03125rem;
+  --text-body-large--font-weight: 400;
+  --text-body-medium: 0.875rem;
+  --text-body-medium--line-height: 1.25rem;
+  --text-body-medium--letter-spacing: 0.015625rem;
+  --text-body-medium--font-weight: 400;
+  --text-body-small: 0.75rem;
+  --text-body-small--line-height: 1rem;
+  --text-body-small--letter-spacing: 0.025rem;
+  --text-body-small--font-weight: 400;
+  --text-label-large: 0.875rem;
+  --text-label-large--line-height: 1.25rem;
+  --text-label-large--letter-spacing: 0.00625rem;
+  --text-label-large--font-weight: 500;
+  --text-label-medium: 0.75rem;
+  --text-label-medium--line-height: 1rem;
+  --text-label-medium--letter-spacing: 0.03125rem;
+  --text-label-medium--font-weight: 500;
+  --text-label-small: 0.6875rem;
+  --text-label-small--line-height: 1rem;
+  --text-label-small--letter-spacing: 0.03125rem;
+  --text-label-small--font-weight: 500;
 
-  --color-status-neutral-bg: var(--status-neutral-bg);
-  --color-status-neutral-fg: var(--status-neutral-fg);
-  --color-status-success-bg: var(--status-success-bg);
-  --color-status-success-fg: var(--status-success-fg);
-  --color-status-warning-bg: var(--status-warning-bg);
-  --color-status-warning-fg: var(--status-warning-fg);
-  --color-status-danger-bg: var(--status-danger-bg);
-  --color-status-danger-fg: var(--status-danger-fg);
+  /* The M3 shape scale. rounded-none and rounded-full are Tailwind's own. */
+  --radius-extra-small: 0.25rem;
+  --radius-small: 0.5rem;
+  --radius-medium: 0.75rem;
+  --radius-large: 1rem;
+  --radius-extra-large: 1.75rem;
 
-  --color-sidebar: var(--sidebar);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-ring: var(--sidebar-ring);
+  /* M3 elevation levels 1 to 5, drawn in the shadow role. Only components whose spec gives them one. */
+  --shadow-level1:
+    0 1px 2px 0 color-mix(in srgb, var(--md-sys-color-shadow) 30%, transparent),
+    0 1px 3px 1px color-mix(in srgb, var(--md-sys-color-shadow) 15%, transparent);
+  --shadow-level2:
+    0 1px 2px 0 color-mix(in srgb, var(--md-sys-color-shadow) 30%, transparent),
+    0 2px 6px 2px color-mix(in srgb, var(--md-sys-color-shadow) 15%, transparent);
+  --shadow-level3:
+    0 1px 3px 0 color-mix(in srgb, var(--md-sys-color-shadow) 30%, transparent),
+    0 4px 8px 3px color-mix(in srgb, var(--md-sys-color-shadow) 15%, transparent);
+  --shadow-level4:
+    0 2px 3px 0 color-mix(in srgb, var(--md-sys-color-shadow) 30%, transparent),
+    0 6px 10px 4px color-mix(in srgb, var(--md-sys-color-shadow) 15%, transparent);
+  --shadow-level5:
+    0 4px 4px 0 color-mix(in srgb, var(--md-sys-color-shadow) 30%, transparent),
+    0 8px 12px 6px color-mix(in srgb, var(--md-sys-color-shadow) 15%, transparent);
+
+  /* M3 motion: ease-standard for most changes, the emphasized pair for things entering and leaving. */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --ease-emphasized-accelerate: cubic-bezier(0.3, 0, 0.8, 0.15);
+
+  /*
+   * M3 window size classes: compact below 600px (no prefix), then medium:, expanded:, large:, and
+   * extra-large:. The max- forms (max-expanded:) work too.
+   */
+  --breakpoint-medium: 37.5rem;
+  --breakpoint-expanded: 52.5rem;
+  --breakpoint-large: 75rem;
+  --breakpoint-extra-large: 100rem;
 }
 
 @layer base {
   * {
-    @apply border-border outline-ring;
+    @apply border-outline-variant;
   }
   /*
-   * The keyboard focus outline for anything without its own: sidebar links, the brand link, stat cards.
-   * The same look as FOCUS_RING in lib/focus-ring.ts, which the primitives and TextLink carry.
+   * The M3 focus indicator: 3px in the secondary role, 2px outside the element, following its corners.
+   * FOCUS_RING in lib/focus-ring.ts is the same look for the primitives; this covers anything else.
    */
   :focus-visible {
-    outline: 2px solid var(--ring);
+    outline: 3px solid var(--md-sys-color-secondary);
     outline-offset: 2px;
   }
-  html {
-    color-scheme: light;
-  }
   body {
-    @apply bg-background text-foreground font-sans antialiased;
-    font-size: 15px;
-    line-height: 1.5;
+    @apply bg-surface text-on-surface font-sans text-body-large antialiased;
+  }
+  ::selection {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
   }
   mark {
-    @apply rounded-sm bg-mark px-0.5 text-foreground;
+    @apply rounded-extra-small bg-mark px-0.5 text-on-mark;
+  }
+  /*
+   * The M3 state layer and ripple from @material/web (components/ui/ripple.tsx). It takes the content
+   * colour of the control it sits in, at the M3 opacities: 8% on hover, 10% when pressed.
+   */
+  md-ripple {
+    border-radius: inherit;
+    --md-ripple-hover-color: currentColor;
+    --md-ripple-pressed-color: currentColor;
+    --md-ripple-hover-opacity: 0.08;
+    --md-ripple-pressed-opacity: 0.1;
   }
 
   /*
    * Reduced motion: every animation and transition finishes at once. Spinners and skeleton
-   * pulses stand still, and the sheet, tooltips, and focus changes appear without moving.
+   * pulses stand still, and the drawer, tooltips, and focus changes appear without moving.
    * !important inside a layer outranks any utility, including one marked important.
    */
   @media (prefers-reduced-motion: reduce) {
@@ -201,13 +247,13 @@
 }
 
 /*
- * Rendered note bodies. Long-form reading: 1.6 line height, calm spacing.
+ * Rendered note bodies in the M3 type scale: body large for the text; headline small, title large
+ * (SectionHeading), title medium, and title small for h1 to h4.
  * Some elements are not styled here because note-body.tsx renders them through shared
  * components: links (TextLink), h2 (SectionHeading), and tables (data-table.tsx, whose
  * wrapper resets overflow-wrap so the "anywhere" below never splits a table cell).
  */
 .prose-note {
-  line-height: 1.6;
   overflow-wrap: anywhere;
 }
 .prose-note > * + * {
@@ -218,22 +264,16 @@
 .prose-note h3,
 .prose-note h4 {
   margin-top: 1.6em;
-}
-.prose-note h1,
-.prose-note h3,
-.prose-note h4 {
-  font-weight: 600;
-  line-height: 1.3;
-  color: var(--foreground);
+  color: var(--md-sys-color-on-surface);
 }
 .prose-note h1 {
-  font-size: 1.5rem;
+  @apply text-headline-small;
 }
 .prose-note h3 {
-  font-size: 1.1rem;
+  @apply text-title-medium;
 }
 .prose-note h4 {
-  font-size: 1rem;
+  @apply text-title-small;
 }
 .prose-note ul,
 .prose-note ol {
@@ -253,24 +293,24 @@
   margin-top: 0.25em;
 }
 .prose-note blockquote {
-  border-left: 3px solid var(--border);
+  border-left: 4px solid var(--md-sys-color-outline-variant);
   padding-left: 1rem;
-  color: var(--muted-foreground);
+  color: var(--md-sys-color-on-surface-variant);
 }
 .prose-note code {
   font-family: var(--font-mono);
   font-size: 0.875em;
-  background: var(--muted);
+  background: var(--md-sys-color-surface-container-high);
   padding: 0.1em 0.35em;
-  border-radius: 4px;
+  border-radius: var(--radius-extra-small);
 }
 .prose-note pre {
   font-family: var(--font-mono);
-  font-size: 0.85rem;
-  background: var(--muted);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 0.85rem 1rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  background: var(--md-sys-color-surface-container);
+  border-radius: var(--radius-medium);
+  padding: 0.75rem 1rem;
   overflow-x: auto;
   white-space: pre-wrap;
   word-break: break-word;
@@ -282,27 +322,59 @@
 }
 .prose-note img {
   max-width: 100%;
-  border-radius: var(--radius);
+  border-radius: var(--radius-medium);
 }
 .prose-note hr {
   border: 0;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--md-sys-color-outline-variant);
   margin: 1.5rem 0;
 }
 .prose-note input[type="checkbox"] {
   margin-right: 0.4rem;
 }
 
+main:has(.note-page) {
+  max-width: 80rem;
+}
+
+.note-content-grid {
+  display: grid;
+  gap: 2rem;
+}
+
+.note-outline {
+  grid-row: 1;
+}
+
+.note-outline:empty {
+  display: none;
+}
+
+/* The large window class: beside the 18rem navigation drawer, the text and the 15rem outline both fit. */
+@media (min-width: 75rem) {
+  .note-content-grid:has(.note-outline nav) {
+    grid-template-columns: minmax(0, 1fr) 15rem;
+  }
+
+  .note-outline {
+    grid-column: 2;
+    position: sticky;
+    top: 5rem;
+    align-self: start;
+  }
+}
+
 /*
  * The print page (/print/notes/:slug, pages/print-note.tsx), on screen and on paper. The server's
  * headless Edge renders it 1024px wide, then prints A4 with 16mm side margins, 178mm of text width.
  * The sheet is that wide on screen too, so tables and gantt charts measure the width they print at.
- * White, Roboto at 11pt on a 1.45 line, and no shadows: cards and figures are hairline borders.
+ * White (theme.css keeps it light in dark mode), Roboto at 11pt on a 1.45 line, and no shadows:
+ * cards and figures are hairline borders.
  */
 .print-page {
   min-height: 100vh;
-  background: var(--card);
-  color: var(--foreground);
+  background: var(--md-sys-color-surface-container-lowest);
+  color: var(--md-sys-color-on-surface);
   font-size: 11pt;
   line-height: 1.45;
   padding-inline: 1rem;
@@ -333,7 +405,7 @@
   }
   html,
   body {
-    background: var(--card);
+    background: var(--md-sys-color-surface-container-lowest);
   }
   *,
   *::before,
