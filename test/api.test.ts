@@ -348,6 +348,52 @@ describe("note list order", () => {
   });
 });
 
+describe("note list text filter", () => {
+  sharedBrain(async (t) => {
+    await t.brain.createTag({ name: "filtertest", description: "Fixtures for the q filter." }, { tool: "test" });
+    const fixture = (slug: string, title: string, summary: string, created: string) => ({
+      slug,
+      frontmatter: { title, type: "note" as const, summary, tags: ["filtertest"], created, updated: created },
+      body: "Quokka appears only in this body.",
+    });
+    await t.writeNotes([
+      fixture("filter-accounting", "Accounting IMS manual", "Journal-entry error rate under 1%.", "2025-01-01"),
+      fixture("filter-billing", "Billing procedure", "Sets the accounting posting after collection.", "2025-02-01"),
+      fixture("filter-hiring", "Hiring workflow", "Personnel request to onboarding.", "2025-03-01"),
+    ]);
+  });
+
+  async function page(query: string): Promise<NotePage> {
+    return (await (await app.request(`/api/notes?tag=filtertest${query}`)).json()) as NotePage;
+  }
+  const slugs = (p: NotePage) => p.items.map((n) => n.slug);
+
+  it("keeps notes whose title or summary holds the word, ignoring case and matching inside words", async () => {
+    expect(slugs(await page("&q=ACC"))).toEqual(["filter-accounting", "filter-billing"]);
+  });
+
+  it("needs every word, which may be split between title and summary", async () => {
+    expect(slugs(await page("&q=billing%20posting"))).toEqual(["filter-billing"]);
+    expect(slugs(await page("&q=billing%20onboarding"))).toEqual([]);
+  });
+
+  it("does not look in the body", async () => {
+    expect((await page("&q=quokka")).total).toBe(0);
+  });
+
+  it("counts only matching notes in total and sorts and pages after filtering", async () => {
+    const first = await page("&q=acc&sort=created&limit=1");
+    expect(first.total).toBe(2);
+    expect(slugs(first)).toEqual(["filter-billing"]);
+    expect(slugs(await page("&q=acc&sort=created&limit=1&offset=1"))).toEqual(["filter-accounting"]);
+  });
+
+  it("ignores an empty or blank q", async () => {
+    expect((await page("&q=")).total).toBe(3);
+    expect((await page("&q=%20%20")).total).toBe(3);
+  });
+});
+
 describe("note writes", () => {
   freshBrainPerTest();
 

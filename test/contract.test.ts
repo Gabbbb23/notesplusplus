@@ -69,6 +69,11 @@ describe("query strings", () => {
     expect(problems(noteListQuerySchema, { type: "bogus" })).toEqual(["type must be one of note, hub, source"]);
   });
 
+  it("GET /api/notes: q is text, and an empty q counts as absent", () => {
+    expect(noteListQuerySchema.parse({ q: "" }).q).toBeUndefined();
+    expect(noteListQuerySchema.parse({ q: "acc manual" }).q).toBe("acc manual");
+  });
+
   it("GET /api/search: q is required, limit defaults to 20, and files is read into includeFiles", () => {
     expect(searchQuerySchema.parse({ q: "x" })).toEqual({ q: "x", limit: 20, options: { includeFiles: undefined } });
     expect(searchQuerySchema.parse({ q: "x", files: "false" }).options.includeFiles).toBe(false);
