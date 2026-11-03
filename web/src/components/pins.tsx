@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { NoteRef, PinTarget } from "@/lib/types";
+import type { NoteRef, PinnedNotes, PinTarget } from "@/lib/types";
 
 /*
  * The owner's pins: notes pinned to Home and to the sidebar, stored by the server in pins.yml
@@ -16,14 +16,20 @@ import type { NoteRef, PinTarget } from "@/lib/types";
 
 export type MoveDirection = "up" | "down";
 
+/**
+ * A pinned note: what names and links it, and its tags. Every pin the server sends has them; a pin
+ * still on its way has them when the note it was made from did. Home's Pinned rows show the domain tag.
+ */
+export type PinnedNote = NoteRef & { tags?: string[] };
+
 /** Each target's pinned notes in pin order. */
 export interface PinLists {
-  home: NoteRef[];
-  sidebar: NoteRef[];
+  home: PinnedNote[];
+  sidebar: PinnedNote[];
 }
 
 export type PinChange =
-  | { kind: "pin"; note: NoteRef; target: PinTarget; pinned: boolean }
+  | { kind: "pin"; note: PinnedNote; target: PinTarget; pinned: boolean }
   | { kind: "move"; slug: string; target: PinTarget; direction: MoveDirection };
 
 /** How a target reads inside a sentence: "Pinned to Home", "Unpinned from sidebar". */
@@ -65,10 +71,13 @@ function pinFailureTitle(change: PinChange): string {
   return change.pinned ? `Could not pin to ${name}` : `Could not unpin from ${name}`;
 }
 
-/** The lists without the fields the pins UI does not use, so optimistic entries and server answers look alike. */
-function toLists(answer: { home: NoteRef[]; sidebar: NoteRef[] }): PinLists {
-  const ref = ({ slug, title, type }: NoteRef): NoteRef => ({ slug, title, type });
-  return { home: answer.home.map(ref), sidebar: answer.sidebar.map(ref) };
+/** A pin with only the fields the pins UI uses, so optimistic entries and server answers look alike. */
+function toPinned({ slug, title, type, tags }: PinnedNote): PinnedNote {
+  return tags ? { slug, title, type, tags } : { slug, title, type };
+}
+
+function toLists(answer: PinnedNotes): PinLists {
+  return { home: answer.home.map(toPinned), sidebar: answer.sidebar.map(toPinned) };
 }
 
 export type PinsStatus = "loading" | "ready" | "error";
@@ -80,7 +89,7 @@ export interface Pins {
   status: PinsStatus;
   isPinned(slug: string, target: PinTarget): boolean;
   /** Pin a note to the end of a target's list, or unpin it. */
-  setPin(note: NoteRef, target: PinTarget, pinned: boolean): void;
+  setPin(note: PinnedNote, target: PinTarget, pinned: boolean): void;
   /** Swap a pinned note with its neighbour above or below. Nothing happens at either end. */
   move(slug: string, target: PinTarget, direction: MoveDirection): void;
   /** Load the lists again if the first load failed. Menus call it when they open. */
@@ -159,7 +168,7 @@ export function PinsProvider({ children }: { children: ReactNode }) {
       lists,
       status,
       isPinned: (slug, target) => lists[target].some((n) => n.slug === slug),
-      setPin: (note, target, pinned) => change({ kind: "pin", note: { slug: note.slug, title: note.title, type: note.type }, target, pinned }),
+      setPin: (note, target, pinned) => change({ kind: "pin", note: toPinned(note), target, pinned }),
       move: (slug, target, direction) => change({ kind: "move", slug, target, direction }),
       retryLoad: () => {
         if (status !== "error") return;

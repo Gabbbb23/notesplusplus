@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 /** Every variant: underline on hover, and the app's keyboard focus outline with soft corners. */
 const LINK_CLASS = `min-w-0 rounded-extra-small hover:underline ${FOCUS_RING}`;
 
-export type TextLinkVariant = "inline" | "strong" | "title" | "muted";
+export type TextLinkVariant = "inline" | "strong" | "title" | "card" | "muted";
 
 const VARIANT_CLASS: Record<TextLinkVariant, string> = {
   /** Inherits the surrounding size and weight. */
@@ -22,6 +22,12 @@ const VARIANT_CLASS: Record<TextLinkVariant, string> = {
   strong: "text-primary font-medium",
   /** A card title. */
   title: "text-primary text-title-medium",
+  /*
+   * The title of a card that is one target as a whole: the link stretches over the nearest positioned
+   * ancestor (ItemCard), so the card shows the state layer instead of an underline and the focus
+   * indicator goes around the card.
+   */
+  card: "text-on-surface text-title-medium hover:no-underline focus-visible:outline-none after:absolute after:inset-0 after:rounded-medium focus-visible:after:outline-3 focus-visible:after:outline-offset-2 focus-visible:after:outline-solid focus-visible:after:outline-secondary",
   /**
    * Quiet wayfinding, such as a breadcrumb: on-surface-variant text that turns on-surface on hover, and
    * a hit area at least 24px tall (padding only, no visual change).
@@ -58,13 +64,21 @@ export function TextLink({ children, variant = "inline", to, href, ...rest }: Te
   const content = typeof children === "string" ? <BreakableText text={children} /> : children;
   if (to !== undefined) {
     return (
-      <Link to={to} data-slot="text-link" className={className} {...rest}>
+      <Link to={to} data-slot="text-link" data-card-link={variant === "card" || undefined} className={className} {...rest}>
         {content}
       </Link>
     );
   }
   return (
-    <a href={href} target="_blank" rel="noopener noreferrer" data-slot="text-link" className={className} {...rest}>
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      data-slot="text-link"
+      data-card-link={variant === "card" || undefined}
+      className={className}
+      {...rest}
+    >
       {content}
       <ExternalMark />
     </a>

@@ -5,8 +5,9 @@ import { App } from "../src/App";
 import type { Note, NoteSummary } from "../src/lib/types";
 import { callsTo, deferred, pinned, reply, resetToasts, settle, stubApi, summary, type Route } from "./api-stub";
 
-const RIZAL = summary("rizal-day", "Rizal Day");
+const RIZAL = { ...summary("rizal-day", "Rizal Day"), tags: ["holidays", "college"] };
 const BUDGET = summary("fields-budget", "Fields budget", "hub");
+const COLLEGE = { ...summary("college", "College", "hub"), tags: ["college"] };
 const LONG = summary(
   "ge09-life-and-works-of-rizal-module-3",
   "GE09 Life and Works of Rizal: Module 3, the Noli Me Tangere and the novels that followed it",
@@ -33,7 +34,10 @@ function LocationProbe() {
 function renderAt(path: string, routes: Record<string, Route>) {
   const fetchMock = stubApi({
     "/api/stats": () => reply(200, { notes: 3, files: 0, invalid: 0 }),
-    "/api/notes/index": () => reply(200, note(summary("index", "Index", "hub"), "The root hub.")),
+    // One domain, College, so a pinned note carrying #college names it.
+    "/api/notes/index": () => reply(200, { ...note(summary("index", "Index", "hub"), "The root hub."), links: ["college"] }),
+    "/api/notes?type=hub&limit=500": () => reply(200, { items: [COLLEGE], total: 1, limit: 500, offset: 0 }),
+    "/api/tags": () => reply(200, [{ name: "college", description: "", count: 2 }]),
     // Home's Recent section, empty here so these tests see only the pins. Its own tests are recent-notes.test.tsx.
     "/api/notes?sort=created&limit=50": () => reply(200, { items: [], total: 0, limit: 50, offset: 0 }),
     ...routes,
@@ -55,10 +59,10 @@ const noteRoutes = (n: NoteSummary, backlinks: NoteSummary[] = []): Record<strin
 
 const location = () => screen.getByTestId("location").textContent;
 
-/** The cards in Home's Pinned section, by title. */
+/** The rows in Home's Pinned section, by title. */
 function pinnedCards() {
   const section = screen.getByRole("region", { name: "Pinned" });
-  return Array.from(section.querySelectorAll<HTMLElement>("[data-slot='item-card']"));
+  return Array.from(section.querySelectorAll<HTMLElement>("[data-slot='link-row']"));
 }
 const titles = (cards: HTMLElement[]) => cards.map((c) => within(c).getAllByRole("link")[0]!.textContent);
 
@@ -76,7 +80,7 @@ afterEach(() => {
 });
 
 describe("Home: Pinned", () => {
-  it("lists the Home pins at the top as compact cards in pin order, each with its menu", async () => {
+  it("lists the Home pins under the domains as rows in pin order, each with its type, its domain, and its menu", async () => {
     renderAt("/", { "/api/pins": () => reply(200, pinned([BUDGET, RIZAL, LONG])) });
 
     const heading = await screen.findByRole("heading", { level: 2, name: "Pinned" });
@@ -84,23 +88,26 @@ describe("Home: Pinned", () => {
     const cards = pinnedCards();
     expect(titles(cards)).toEqual([BUDGET.title, RIZAL.title, LONG.title]);
     expect(within(cards[0]!).getByRole("link")).toHaveAttribute("href", "/notes/fields-budget");
-    expect(within(cards[0]!).getByText("hub")).toBeInTheDocument();
-    // Compact: no summary, tags, or dates.
-    expect(cards[0]!.querySelector("[data-slot='meta-row']")).toBeNull();
+    expect(within(cards[0]!).getByRole("img", { name: "hub" })).toBeInTheDocument();
+    expect(within(cards[2]!).getByRole("img", { name: "source" })).toBeInTheDocument();
+    // The domain tag under the title, even when it is not the note's first tag; nothing for a note in no domain.
+    expect(cards[1]!.querySelector("[data-slot='tag-name']")).toHaveTextContent("#college");
+    expect(cards[0]!.querySelector("[data-slot='tag-name']")).toBeNull();
     for (const card of cards) {
       expect(within(card).getByRole("button", { name: /^More actions for / })).toBeInTheDocument();
     }
 
-    // Above the stats and the root hub's content.
+    // Under the domains, above the stats.
     const section = heading.closest("section")!;
-    const stats = screen.getByLabelText("Stats");
+    const domains = screen.getByRole("region", { name: "Domains" });
+    const stats = await screen.findByRole("region", { name: "Stats" });
+    expect(domains.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(section.compareDocumentPosition(stats) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(section.compareDocumentPosition(screen.getByText("The root hub.")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("shows nothing without Home pins", async () => {
     renderAt("/", { "/api/pins": () => reply(200, pinned([], [RIZAL])) });
-    await screen.findByText("The root hub.");
+    await screen.findByRole("region", { name: "Domains" });
     await settle();
     expect(screen.queryByRole("heading", { name: "Pinned" })).toBeNull();
     expect(screen.queryByRole("region", { name: "Pinned" })).toBeNull();
@@ -108,7 +115,7 @@ describe("Home: Pinned", () => {
 
   it("shows nothing when the pins fail to load", async () => {
     renderAt("/", {});
-    await screen.findByText("The root hub.");
+    await screen.findByRole("region", { name: "Domains" });
     await settle();
     expect(screen.queryByRole("region", { name: "Pinned" })).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
@@ -266,7 +273,9 @@ describe("the navigation rail and drawers", () => {
     expect(drawer()).toHaveClass("hidden", "expanded:flex");
     expect(destinations(mainNav(rail()))).toEqual(destinations(mainNav(drawer())));
     expect(destinations(mainNav(rail())).map(([label]) => label)).toEqual(["Home", "Search", "Tags", "Bookmarks", "Inbox", "Files", "Check"]);
-    // Pins stay in the drawers; the rail has only the destinations.
+    // Domains and pins stay in the drawers; the rail has only the destinations.
+    expect(await within(drawer()).findByRole("navigation", { name: "Domains" })).toBeInTheDocument();
+    expect(within(rail()).queryByRole("navigation", { name: "Domains" })).toBeNull();
     expect(within(rail()).queryByRole("navigation", { name: "Pinned" })).toBeNull();
     // The compact top app bar's menu button hides once the rail, with its own, takes over.
     expect(within(topAppBar()).getByRole("button", { name: "Open menu" })).toHaveClass("medium:hidden");
@@ -293,6 +302,7 @@ describe("the navigation rail and drawers", () => {
     fireEvent.click(button);
     const sheet = await screen.findByRole("dialog");
     expect(within(sheet).getByRole("navigation", { name: "Main" })).toBeInTheDocument();
+    expect(await within(sheet).findByRole("navigation", { name: "Domains" })).toBeInTheDocument();
     expect(within(sheet).getByRole("navigation", { name: "Pinned" })).toBeInTheDocument();
 
     fireEvent.keyDown(sheet, { key: "Escape" });

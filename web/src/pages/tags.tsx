@@ -1,35 +1,13 @@
+import { TagIcon } from "lucide-react";
 import { TagName } from "@/components/badges";
-import { DataTable, type Column } from "@/components/data-table";
+import { LinkRow, RowList } from "@/components/note-row";
 import { PageHeader } from "@/components/page-header";
-import { ErrorAlert, LoadingBlock } from "@/components/page-state";
-import { TextLink } from "@/components/text-link";
+import { EmptyState, ErrorAlert, LoadingBlock } from "@/components/page-state";
 import { api, tagUrl } from "@/lib/api";
 import { TOP_LEVEL_CRUMBS } from "@/lib/breadcrumb-items";
-import type { TagWithCount } from "@/lib/types";
 import { useAsync } from "@/lib/use-async";
 
-const columns: Column<TagWithCount>[] = [
-  {
-    id: "tag",
-    header: "Tag",
-    size: "fill",
-    primary: true,
-    cell: (t) => (
-      <TextLink to={tagUrl(t.name)} variant="strong">
-        <TagName name={t.name} />
-      </TextLink>
-    ),
-  },
-  {
-    id: "description",
-    header: "Description",
-    size: "fill",
-    cell: (t) => <span className="text-on-surface-variant">{t.description}</span>,
-  },
-  { id: "count", header: "Notes", align: "end", cell: (t) => t.count },
-];
-
-/** One request: GET /api/tags carries each tag's note count. */
+/** One request: GET /api/tags carries each tag's note count. Each tag is one list row that opens its page. */
 export function TagsPage() {
   const { data, error, loading, reload } = useAsync(() => api.tags(), []);
   return (
@@ -37,7 +15,21 @@ export function TagsPage() {
       <PageHeader title="Tags" breadcrumbs={TOP_LEVEL_CRUMBS} />
       {loading && <LoadingBlock lines={6} />}
       {error && <ErrorAlert error={error} onRetry={reload} />}
-      {data && <DataTable columns={columns} rows={data} rowKey={(t) => t.name} caption="Tags" empty="No tags yet." />}
+      {data && data.length === 0 && <EmptyState>No tags yet.</EmptyState>}
+      {data && data.length > 0 && (
+        <RowList label="Tags">
+          {data.map((t) => (
+            <LinkRow
+              key={t.name}
+              to={tagUrl(t.name)}
+              headline={<TagName name={t.name} />}
+              leading={<TagIcon className="size-6 shrink-0 text-on-surface-variant" aria-hidden="true" />}
+              supporting={t.description || undefined}
+              trailing={`${t.count} ${t.count === 1 ? "note" : "notes"}`}
+            />
+          ))}
+        </RowList>
+      )}
     </>
   );
 }

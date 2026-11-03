@@ -337,6 +337,10 @@ main:has(.note-page) {
   max-width: 80rem;
 }
 
+main:has(.home-page) {
+  max-width: 80rem;
+}
+
 .note-content-grid {
   display: grid;
   gap: 2rem;

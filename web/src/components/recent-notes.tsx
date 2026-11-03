@@ -1,8 +1,7 @@
 import { useState, type ReactNode } from "react";
-import { CardList, LoadingCards } from "@/components/item-card";
 import { NoteActionsMenu } from "@/components/note-actions-menu";
-import { NoteCard } from "@/components/note-card";
-import { ErrorAlert } from "@/components/page-state";
+import { NoteRow, RowList } from "@/components/note-row";
+import { ErrorAlert, LoadingBlock } from "@/components/page-state";
 import { SectionHeading } from "@/components/section-heading";
 import { ShowMore, ShowMoreLimit, useFocusFirstNew } from "@/components/show-more";
 import { api } from "@/lib/api";
@@ -52,7 +51,7 @@ function dayDetail(group: DayGroup): string {
 
 function Section({ children }: { children: ReactNode }) {
   return (
-    <section aria-labelledby="recent-heading" className="mb-8 space-y-4">
+    <section aria-labelledby="recent-heading" className="space-y-4">
       <SectionHeading id="recent-heading">Recent</SectionHeading>
       {children}
     </section>
@@ -60,7 +59,7 @@ function Section({ children }: { children: ReactNode }) {
 }
 
 /**
- * The newest notes, sources and hubs by created date, in day groups, as compact cards with their
+ * The newest notes, sources and hubs by created date, in day groups, as list rows with their
  * menus. Nothing at all when the brain holds no notes, so a new brain shows only the root hub notice.
  */
 export function RecentNotes() {
@@ -80,7 +79,7 @@ export function RecentNotes() {
   if (!page.data) {
     return (
       <Section>
-        <LoadingCards count={3} />
+        <LoadingBlock lines={5} />
       </Section>
     );
   }
@@ -90,16 +89,17 @@ export function RecentNotes() {
     <Section>
       <div ref={listRef} className="space-y-4">
         {groupByDay(visible).map((group) => (
-          <div key={group.date} className="space-y-2">
-            <h3 className="flex flex-wrap items-baseline gap-x-2 text-title-small text-on-surface">
+          <div key={group.date}>
+            {/* The day is the list's subheader, inset 16px like the rows' icons below it. */}
+            <h3 className="flex flex-wrap items-baseline gap-x-2 px-4 pb-1 text-title-small text-on-surface">
               {group.date}
               <span className="text-body-small text-on-surface-variant">{dayDetail(group)}</span>
             </h3>
-            <CardList>
+            <RowList>
               {group.notes.map((note) => (
-                <NoteCard key={note.slug} compact note={note} actions={<NoteActionsMenu note={note} />} />
+                <NoteRow key={note.slug} note={note} actions={<NoteActionsMenu note={note} />} />
               ))}
-            </CardList>
+            </RowList>
           </div>
         ))}
       </div>

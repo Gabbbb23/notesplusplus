@@ -216,7 +216,7 @@ describe("other pages", () => {
     });
     renderAt("/");
 
-    await screen.findByRole("heading", { level: 1, name: "Index" });
+    await screen.findByRole("heading", { level: 1, name: "Home" });
     await settle();
     expect(screen.queryByRole("navigation", { name: "Breadcrumb" })).toBeNull();
     // The drawer's and the rail's; CSS shows one at a time.

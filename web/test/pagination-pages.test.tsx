@@ -227,7 +227,9 @@ function noteSummary(i: number): NoteSummary {
 const notes = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => noteSummary(from + i));
 const notesUrl = (offset: number) => `/api/notes?tag=college&limit=50&offset=${offset}`;
 
-describe("Tag page", () => {
+// Each test draws up to 93 note cards in jsdom, where each card's ripple is a Lit element with its own shadow
+// root: 20 to 30 s on a busy laptop, against the 15 s default.
+describe("Tag page", { timeout: 60_000 }, () => {
   it("shows the total in the heading and Showing 50 of 93 beside the button", async () => {
     const fetchMock = stubApi({
       "/api/tags": TAGS,
@@ -347,13 +349,13 @@ describe("Tags page", () => {
     });
     renderAt("/tags");
 
-    const table = await screen.findByRole("table", { name: "Tags" });
-    const rows = within(table).getAllByRole("row").slice(1);
-    expect(rows.map((r) => within(r).getAllByRole("cell").map((c) => c.textContent))).toEqual([
-      ["#college", "BSIT degree", "93"],
-      ["#hardware", "Laptops and parts", "4"],
-    ]);
-    // The layout loads the pins once for every page; the Tags page itself asks for the tags alone.
-    expect(urls(fetchMock).filter((u) => u !== "/api/pins")).toEqual(["/api/tags"]);
+    const list = await screen.findByRole("list", { name: "Tags" });
+    const rows = within(list).getAllByRole("listitem");
+    expect(rows.map((r) => within(r).getByRole("link").textContent)).toEqual(["#college", "#hardware"]);
+    expect(rows.map((r) => r.textContent)).toEqual(["#collegeBSIT degree93 notes", "#hardwareLaptops and parts4 notes"]);
+    expect(within(rows[0]!).getByRole("link")).toHaveAttribute("href", "/tags/college");
+    // The layout loads the pins and the root hub (for the drawer's domains) once for every page; the Tags page
+    // itself asks for the tags alone.
+    expect(urls(fetchMock).filter((u) => u !== "/api/pins" && u !== "/api/notes/index")).toEqual(["/api/tags"]);
   });
 });

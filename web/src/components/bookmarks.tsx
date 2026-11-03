@@ -1,5 +1,5 @@
 import { BookmarkIcon, PlusIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { BookmarkGroup, BookmarkLists, NoteRef } from "@/lib/types";
@@ -71,4 +71,75 @@ export function BookmarkAssignment({ note }: { note: NoteRef }) {
   );
 }
 
-export function bookmarkGroupNotes(group: BookmarkGroup, notes: readonly NoteRef[]): NoteRef[] { const bySlug = new Map(notes.map((note) => [note.slug, note])); return group.slugs.flatMap((slug) => { const note = bySlug.get(slug); return note ? [note] : []; }); }
+/** The id of a group's section on the Bookmarks page, so a link to `/bookmarks#<id>` opens that group. */
+export function bookmarkGroupId(name: string): string {
+  return `bookmark-group-${name}`;
+}
+
+/**
+ * The Bookmarks page's New group button and its M3 basic dialog: a Group name field, then Cancel and Create.
+ * Create hands the server's lists to onCreated and closes the dialog, and focus goes back to the button.
+ */
+export function NewGroupDialog({ onCreated }: { onCreated: (lists: BookmarkLists) => void }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const value = name.trim();
+
+  const create = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!value || busy) return;
+    setBusy(true);
+    try {
+      const lists = await api.createBookmarkGroup(value);
+      onCreated(lists);
+      toast.success("Bookmark group created");
+      setOpen(false);
+      setName("");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not create bookmark group");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) setName("");
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button variant="tonal">
+          <PlusIcon aria-hidden="true" />
+          New group
+        </Button>
+      </DialogTrigger>
+      <DialogContent data-slot="new-group-dialog" aria-describedby={undefined} className="w-md">
+        <DialogTitle>New group</DialogTitle>
+        <form className="flex flex-col gap-4" onSubmit={(event) => void create(event)}>
+          <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Group name" aria-label="Group name" />
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button type="button" variant="text">Cancel</Button>
+            </DialogClose>
+            <Button type="submit" variant="text" disabled={!value || busy} aria-busy={busy || undefined}>
+              Create
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** The group's notes in its own order, skipping slugs that are not among `notes`. */
+export function bookmarkGroupNotes<T extends NoteRef>(group: BookmarkGroup, notes: readonly T[]): T[] {
+  const bySlug = new Map(notes.map((note) => [note.slug, note]));
+  return group.slugs.flatMap((slug) => {
+    const note = bySlug.get(slug);
+    return note ? [note] : [];
+  });
+}

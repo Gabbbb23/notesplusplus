@@ -35,12 +35,15 @@ function hub(): Note {
   };
 }
 
-/** Home with its three other requests answered, rendered and settled: every fetch has landed. */
+/** Home with its other requests answered, rendered and settled: every fetch has landed. */
 async function renderHome(routes: Record<string, Route>) {
   const fetchMock = stubApi({
     "/api/notes/index": () => reply(200, hub()),
+    "/api/notes?type=hub&limit=500": () => reply(200, page([])),
+    "/api/tags": () => reply(200, []),
     "/api/stats": () => reply(200, { notes: 4, files: 0, invalid: 0 }),
     "/api/pins": () => reply(200, { home: [], sidebar: [] }),
+    "/api/bookmarks": () => reply(200, { groups: [{ name: "thesis", slugs: [] }] }),
     ...routes,
   });
   render(
@@ -48,7 +51,7 @@ async function renderHome(routes: Record<string, Route>) {
       <App />
     </MemoryRouter>,
   );
-  await screen.findByText("The root hub.");
+  await screen.findByRole("region", { name: "Domains" });
   await settle();
   return fetchMock;
 }
@@ -92,19 +95,24 @@ describe("Home's Recent section", () => {
       "href",
       "/notes/fields-recent",
     );
-    // The type is on the card, so a source or a hub is recognisable without opening it.
-    expect(within(section).getByText("source")).toBeInTheDocument();
-    expect(within(section).getByText("hub")).toBeInTheDocument();
+    // Each row names its type, so a source or a hub is recognisable without opening it.
+    expect(within(section).getByRole("img", { name: "source" })).toBeInTheDocument();
+    expect(within(section).getByRole("img", { name: "hub" })).toBeInTheDocument();
+    expect(within(section).getAllByRole("img", { name: "note" })).toHaveLength(2);
+    // Each row has its menu.
+    expect(within(section).getAllByRole("button", { name: /^More actions for / })).toHaveLength(4);
   });
 
-  it("sits under the stats and above the root hub's content", async () => {
+  it("opens the supporting pane, after the domains and before the bookmarks and the stats", async () => {
     await renderHome({ [RECENT_URL]: () => reply(200, page([on("2026-09-17", "a", "A note")])) });
 
     const section = screen.getByRole("region", { name: "Recent" });
-    const stats = screen.getByLabelText("Stats");
-    const body = screen.getByText("The root hub.");
-    expect(stats.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(section.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const domains = screen.getByRole("region", { name: "Domains" });
+    const bookmarks = screen.getByRole("region", { name: "Bookmarks" });
+    const stats = screen.getByRole("region", { name: "Stats" });
+    expect(domains.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(section.compareDocumentPosition(bookmarks) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(bookmarks.compareDocumentPosition(stats) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("shows the newest eight, then the rest from Show more notes", async () => {
@@ -121,6 +129,8 @@ describe("Home's Recent section", () => {
     });
 
     expect(within(section).getAllByRole("link")).toHaveLength(11);
+    // Focus carries on from the first row the click added.
+    expect(within(section).getByRole("link", { name: "Note 8" })).toHaveFocus();
     expect(within(section).queryByRole("button", { name: "Show more notes" })).toBeNull();
     expect(dayHeadings()).toEqual(["2026-09-17today · 11 notes"]);
   });

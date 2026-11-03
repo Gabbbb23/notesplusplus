@@ -45,7 +45,9 @@ A 4px rhythm. Layout follows the M3 window size classes, available as Tailwind v
 | Medium | navigation rail; its menu button opens the modal drawer, which also holds the pins |
 | Expanded and up | standard navigation drawer with the destinations and the pins |
 
-The content column is capped at 52rem, 80rem on a note page with its outline. Primary content never scrolls sideways. Touch targets are at least 48 by 48px.
+The content column is capped at 52rem, and at 80rem on a note page with its outline and on Home.
+
+Home follows the M3 supporting-pane layout. The main column holds the domains (filled cards, one per hub the root hub lists) and then the pinned notes. From 1200px a pane on the right holds Recent, the bookmark groups, and the stats; narrower windows stack them below. The navigation drawer lists the same domains between its destinations and the pins. Primary content never scrolls sideways. Touch targets are at least 48 by 48px.
 
 ## 5. Components
 
@@ -54,7 +56,8 @@ Each control is the M3 component and variant for its emphasis.
 - **Buttons.** `Button` takes `variant` filled (the one action that moves work forward), tonal, outlined, text, elevated, or standard (an icon button with no container), and `size` default (40px), small (32px), icon (40px round), or icon-small (32px round).
 - **Text fields.** Outlined text fields, 56px. Search fields are the M3 search bar: a full-round `surface-container-high` field with a leading search icon.
 - **Menus.** `surface-container`, extra-small shape, elevation level 2, 48px items.
-- **Cards.** Outlined cards for lists of notes and search results; filled cards for Home's stats.
+- **Lists.** `NoteRow` is the M3 list item for one note: type icon, title, an optional supporting line, trailing text and actions, the whole row one target. Home's pins and Recent and the Bookmarks list and details views use it.
+- **Cards.** Outlined cards for search results and the Tag page; filled cards for Home's domains.
 - **Chips.** Tag links are assist chips. Type and sort pickers are chips that open a menu.
 - **Segmented buttons.** The search mode switch and the view switch.
 - **Dialogs.** The bookmark dialog is an M3 basic dialog: headline-small title, text-button actions on the right.

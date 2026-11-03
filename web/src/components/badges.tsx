@@ -3,7 +3,8 @@ import { Link } from "react-router";
 import { BreakableText } from "@/components/breakable-text";
 import { Badge } from "@/components/ui/badge";
 import { Ripple } from "@/components/ui/ripple";
-import { tagUrl } from "@/lib/api";
+import { noteUrl, tagUrl } from "@/lib/api";
+import type { NoteRef } from "@/lib/types";
 
 /*
  * Every badge in the app. This is the only module that imports the shadcn Badge, which draws the
@@ -83,6 +84,18 @@ export function TagBadge({ name }: { name: string }) {
       <Link to={tagUrl(name)} data-slot="tag-badge">
         {/* One flex child (the ripple is absolute), so the badge's gap never separates "#" from the name. */}
         <TagName name={name} />
+        <Ripple />
+      </Link>
+    </Badge>
+  );
+}
+
+/** A note as the same assist chip, its title linking to the note: a domain card's sub-hubs. */
+export function NoteChip({ note }: { note: NoteRef }) {
+  return (
+    <Badge variant="outline" asChild className={TAG_BADGE_CLASS}>
+      <Link to={noteUrl(note.slug)} data-slot="note-chip">
+        <BreakableText text={note.title} />
         <Ripple />
       </Link>
     </Badge>

@@ -248,7 +248,7 @@ const RULES: Rule[] = [
     allowed: ["components/item-card.tsx"],
     check: (s) =>
       importsUi(s, "card")
-        ? "imports @/components/ui/card. Use ItemCard, SectionCard, StatCard, or LoadingCards from @/components/item-card."
+        ? "imports @/components/ui/card. Use ItemCard, SectionCard, or LoadingCards from @/components/item-card."
         : null,
   },
   {

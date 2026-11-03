@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { Link } from "react-router";
 import { StatusBadge } from "@/components/badges";
 import { BreakableText } from "@/components/breakable-text";
 import { MetaRow } from "@/components/meta";
@@ -7,12 +6,11 @@ import { TextLink } from "@/components/text-link";
 import { Card } from "@/components/ui/card";
 import { Ripple } from "@/components/ui/ripple";
 import { Skeleton } from "@/components/ui/skeleton";
-import { FOCUS_RING } from "@/lib/focus-ring";
 import { cn } from "@/lib/utils";
 
 /*
- * Every card in the app. This is the only module that imports the shadcn Card, which is the M3
- * outlined card. Home's stats turn it into the filled card.
+ * Every card in the app built on the shadcn Card, which is the M3 outlined card. This is the only
+ * module that imports it. Home's domain cards are filled cards with no outline (domains.tsx).
  */
 
 const SHELL_CLASS = "min-w-0 wrap-break-word";
@@ -29,14 +27,14 @@ export type ItemCardTitle =
 function CardTitle({ title }: { title: ItemCardTitle }) {
   if (title.to !== undefined) {
     return (
-      <TextLink to={title.to} variant="title">
+      <TextLink to={title.to} variant="card">
         {title.text}
       </TextLink>
     );
   }
   if (title.href !== undefined) {
     return (
-      <TextLink href={title.href} variant="title">
+      <TextLink href={title.href} variant="card">
         {title.text}
       </TextLink>
     );
@@ -62,10 +60,18 @@ export interface ItemCardProps {
   actions?: ReactNode;
 }
 
-/** One thing in a list: a note, a search result, a backlink. */
+/*
+ * A linked card is one target: its title link stretches over the card, and every other link or button
+ * inside (the menu, tag chips, file buttons) sits above it, so each still works on its own.
+ */
+const LINKED_CARD_CLASS =
+  "relative [&_a:not([data-card-link])]:relative [&_a:not([data-card-link])]:z-10 [&_button]:relative [&_button]:z-10";
+
+/** One thing in a list: a note, a search result, a backlink. A linked title makes the whole card open it. */
 export function ItemCard({ title, badge, summary, snippet, meta, actions }: ItemCardProps) {
+  const linked = title.to !== undefined || title.href !== undefined;
   return (
-    <Card data-slot="item-card" className={cn(SHELL_CLASS, "gap-2")}>
+    <Card data-slot="item-card" className={cn(SHELL_CLASS, "gap-2", linked && LINKED_CARD_CLASS)}>
       <div className="flex items-start gap-2">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
           <CardTitle title={title} />
@@ -84,6 +90,7 @@ export function ItemCard({ title, badge, summary, snippet, meta, actions }: Item
       {summary && <div className="text-body-medium text-on-surface-variant">{summary}</div>}
       {snippet && <div className="text-body-medium">{snippet}</div>}
       {meta && <MetaRow>{meta}</MetaRow>}
+      {linked && <Ripple />}
     </Card>
   );
 }
@@ -118,37 +125,6 @@ export function SectionCard({
         {description && <p className="text-body-medium text-on-surface-variant">{description}</p>}
       </div>
       <div className="min-w-0">{children}</div>
-    </Card>
-  );
-}
-
-/**
- * A number with a label on an M3 filled card, the whole card one link to the page that explains it.
- * warn paints the number in the error role.
- */
-export function StatCard({
-  label,
-  value,
-  to,
-  warn = false,
-}: {
-  label: string;
-  /** undefined while loading: shows a placeholder bar. */
-  value: number | undefined;
-  to: string;
-  warn?: boolean;
-}) {
-  return (
-    <Card data-slot="stat-card" className="min-w-0 gap-0 border-0 bg-surface-container-highest p-0">
-      <Link to={to} className={cn("relative block rounded-medium p-4", FOCUS_RING)}>
-        {value === undefined ? (
-          <Skeleton className="h-9 w-12" />
-        ) : (
-          <div className={cn("text-headline-medium", warn && "text-error")}>{value}</div>
-        )}
-        <div className="text-label-large text-on-surface-variant">{label}</div>
-        <Ripple />
-      </Link>
     </Card>
   );
 }

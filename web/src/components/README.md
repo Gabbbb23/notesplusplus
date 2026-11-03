@@ -73,7 +73,7 @@ As a last resort the text breaks anywhere.
 
 - `to` for an app route, opened in the same tab.
 - `href` for a site, opened in a new tab with `rel="noopener noreferrer"` and the external-link icon.
-- `variant`: `inline` (default, inherits size and weight), `strong` (medium weight), `title` (a card title, `text-title-medium`), or `muted` (breadcrumbs: `on-surface-variant` text that turns `on-surface` on hover, and a hit area at least 24px tall).
+- `variant`: `inline` (default, inherits size and weight), `strong` (medium weight), `title` (a title in `text-title-medium`), `card` (the title of a card that opens as a whole: `on-surface`, no underline, the link stretched over the card with the focus indicator around it), or `muted` (breadcrumbs: `on-surface-variant` text that turns `on-surface` on hover, and a hit area at least 24px tall).
 - Every variant but `muted` is `text-primary`. Every variant is underlined on hover and has `FOCUS_RING` and the `rounded-extra-small` (4px) radius, so the focus outline has soft corners.
 - String children wrap through `BreakableText`.
 
@@ -103,27 +103,31 @@ Every label pill and tag chip, and the one way to show a tag name. It is the onl
 - `KindBadge` for note, hub, source, file.
 - `FileTypeBadge` for a file extension.
 - `StatusBadge` with a `tone` of neutral, success, warning, or danger, for states and counts.
-- `TagName` for a tag as text: an `on-surface-variant` `#` and the name, wrapping. The Tags table, the Tag page heading, and the Search tag filter use it.
+- `TagName` for a tag as text: an `on-surface-variant` `#` and the name, wrapping. The Tags list, the Tag page heading, and the Search tag filter use it.
 - `TagBadge` and `TagBadges` for `#tag` links, each an M3 assist chip: 32px tall, `rounded-small`, a 1px `outline-variant` border, 16px side padding, `text-label-large` in `on-surface-variant`, a `Ripple` state layer, and `FOCUS_RING`. Chips in a row sit 8px apart. A long tag wraps inside its chip, which grows taller and never wider than its container.
+- `NoteChip` (`note`) for a note as the same assist chip, its title linking to the note. A domain card's sub-hubs use it.
 
 The three label pills share one shape: 24px tall, `rounded-small`, 8px side padding, `text-label-medium`. Their colours are the `kind-*` and `status-*` tokens in `src/index.css`, which map onto the M3 container roles.
 
 ## item-card.tsx
 
-Every card. It is the only importer of `ui/card`. Lists and sections use the M3 outlined card: `bg-surface`, a 1px `outline-variant` border, `rounded-medium` (12px), and 16px padding, with no shadow.
+Every card but Home's domain cards (`DomainCard` in `domains.tsx`, an M3 filled card). It is the only importer of `ui/card`. Lists and sections use the M3 outlined card: `bg-surface`, a 1px `outline-variant` border, `rounded-medium` (12px), and 16px padding, with no shadow.
 
-- `ItemCard` for one thing in a list: a title (`to` for an app route, `href` for a new tab, or neither for plain text when the meta row carries a `FileLink`), then optional badge, summary, snippet, and meta row, 8px apart. The title is `text-title-medium`, the summary and snippet `text-body-medium` (the summary in `on-surface-variant`), and the meta row is a `MetaRow`.
+- `ItemCard` for one thing in a list: a title (`to` for an app route, `href` for a new tab, or neither for plain text when the meta row carries a `FileLink`), then optional badge, summary, snippet, and meta row, 8px apart. A linked title makes the whole card one target: the title link (`TextLink` `card`) stretches over the card, the card shows the M3 state layer and ripple, and every other link or button inside (the menu, tag chips, file buttons) sits above it and keeps working on its own. The title is `text-title-medium`, the summary and snippet `text-body-medium` (the summary in `on-surface-variant`), and the meta row is a `MetaRow`.
   - `actions` puts controls at the right end of the title row, such as `NoteActionsMenu`. They sit beside the title link, never inside it, so clicking one does not follow the link. A long title wraps beside them while they stay in the top right corner. Negative margins (8px above, below, and to the right) let a 40px icon button share the 24px title line without making the card taller, and line its icon up with the card's padding.
 - `CardList` stacks cards 8px apart. `NoteList` uses the same gap, in its list and tile views.
 - `SectionCard` for a titled block with an optional count, such as a Check section or the Inbox form: an outlined card with the title in `text-title-medium` and the count as a `StatusBadge` beside it. The Check page has one per list in `GET /api/check-links`: broken links, missing files, missing sources, invalid notes, notes no hub lists, notes listed by more than one hub (each with links to those hubs), and pins to missing notes (each slug as code, since there is no note to link to). Any entry in any list withholds "All clear".
-- `StatCard` for a number with a label on Home: an M3 filled card (`bg-surface-container-highest`, `rounded-medium`), the number in `text-headline-medium` (`text-error` with `warn`) over a `text-label-large` `on-surface-variant` label. The whole card is one link with a `Ripple` state layer.
 - `LoadingCards` for outlined card shapes holding placeholder bars, 8px apart like `CardList`.
 
 `note-card.tsx` and `search-results.tsx` are built on `ItemCard`:
 
-- `NoteCard` (`note`, `actions`) shows a note's title, type, summary, tags, and updated date. With `compact`, it shows the title and type only and takes a `NoteRef` (slug, title, type); Home's Pinned and Recent sections use it.
+- `NoteCard` (`note`, `actions`) shows a note's title, type, summary, tags, and updated date. With `compact`, it shows the title and type only and takes a `NoteRef` (slug, title, type); the tiles views of `NoteList` and the Bookmarks page use it.
 - `NoteList` gives every card its `NoteActionsMenu`. The Tag page and a note's Backlinks use it.
 - `SearchResultCard` gives a note result its `NoteActionsMenu` and a file result none. `SearchResults` opens with a count line in `text-body-medium` `on-surface-variant`: "20 results for “ryzen”", or "More than 20 results for “ryzen”" when its `hasMore` is set. A result's snippet marks its hits with `<mark>` (`Snippet`), which `index.css` paints in the `mark` and `on-mark` tokens.
+
+## note-row.tsx
+
+The M3 list item, for lists the owner scans rather than reads: `LinkRow` (`to`, `headline`, `leading`, `supporting`, `trailing`, `actions`) is one row that opens a page, and `NoteRow` (`note`, plus the same `supporting`, `trailing`, and `actions`) is a `LinkRow` for a note, with the note's type icon in front and its title as the headline. The whole row is the target: the headline's link stretches over it, the row shows the state layer and ripple, and the focus indicator goes around it, while `actions` (usually `NoteActionsMenu`) sit above the link and keep working on their own. A row is 56px tall with one line and grows with a supporting line, which is cut at two lines. The type icon is named by the type ("hub"), outside the link's name, so a screen reader hears the type the old cards showed as a badge. `RowList` holds the rows; Home's Pinned, Recent, Bookmarks, and Stats sections, the Tags page, and the Bookmarks page's list and details views use them. `NOTE_TYPE_ICON` is the icon for each type, which the drawer's pinned links use too.
 
 ## show-more.tsx
 
@@ -131,7 +135,7 @@ The one way a list grows in place. No page builds its own "Show more" button.
 
 - `ShowMore` (`label`, `loading`, `progress`, `onClick`) goes under the list, 16px below it. It renders an outlined `Button` with a chevron, plus the optional `progress` text ("Showing 50 of 93") beside it in `text-body-medium` `on-surface-variant`, which the button names as its description. While `loading`, the button stays where it is, disabled and `aria-busy`, and the chevron turns into a `primary` spinner of the same size, so nothing moves.
 - `ShowMoreLimit` is a `text-body-medium` `on-surface-variant` line in the button's place for a list that stops at a cap.
-- `useFocusFirstNew(count, listKey)` returns `listRef`, for the element around the cards, and `expectMore()`, to call on click. Once more `ItemCard`s render than there were at the click, focus moves to the first link or button in the first new card, so a keyboard user carries on from the new rows. A different `listKey` (a new query or tag) drops the pending focus.
+- `useFocusFirstNew(count, listKey)` returns `listRef`, for the element around the cards or rows, and `expectMore()`, to call on click. Once more `ItemCard`s or `LinkRow`s render than there were at the click, focus moves to the first link or button in the first new one, so a keyboard user carries on from the new rows. A different `listKey` (a new query or tag) drops the pending focus.
 
 Where it is used:
 
@@ -156,9 +160,9 @@ While the filtered list loads, the rows already on screen stay, dimmed and `aria
 
 ## recent-notes.tsx
 
-`RecentNotes` is Home's "Recent" section: what was filed lately, so the newest note is one click from Home instead of a search away. Home is its only caller.
+`RecentNotes` is Home's "Recent" section, at the top of the supporting pane: what was filed lately, so the newest note is one click from Home instead of a search away. Home is its only caller.
 
-- It asks for `GET /api/notes?sort=created&limit=50` once, groups those notes by their `created` date, and shows each day under an `h3`: the date in `text-title-small`, then on the same line a `text-body-small` `on-surface-variant` detail ("today · 3 notes", "yesterday · 1 note", "2 notes" on older days). Rows are compact `NoteCard`s with their `NoteActionsMenu`, so a new note can be pinned or exported from Home.
+- It asks for `GET /api/notes?sort=created&limit=50` once, groups those notes by their `created` date, and shows each day as a list subheader, an `h3` inset like the rows: the date in `text-title-small`, then on the same line a `text-body-small` `on-surface-variant` detail ("today · 3 notes", "yesterday · 1 note", "2 notes" on older days). The notes are `NoteRow`s with their `NoteActionsMenu`, so a new note can be pinned or exported from Home.
 - It orders by `created`, not `updated`: the section answers "what is new", and a note edited today does not come back to the top.
 - Eight notes show at first; `ShowMore` reveals eight more from the batch already fetched, so no request follows a click. Once the batch is fully shown and the brain holds more, `ShowMoreLimit` names the cap ("Showing the newest 50 notes of 191.").
 - A failed load shows an `ErrorAlert` with Try again, which re-runs only this request. An empty brain renders nothing at all, so a new brain shows just the root hub notice.
@@ -168,7 +172,7 @@ While the filtered list loads, the rows already on screen stay, dimmed and `aria
 Small details about a thing.
 
 - `MetaList` with `MetaItem` (`label`, children) for a label and value grid: the note header's tags, dates, path, sources, and files. Labels are `text-label-medium` `on-surface-variant`, values `text-body-medium`, on a shared baseline.
-- `MetaRow` for one wrapping line of details in `text-body-small` `on-surface-variant`: a card's tags and date, the Home hub's tags, date, and "open as note" link.
+- `MetaRow` for one wrapping line of details in `text-body-small` `on-surface-variant`: a card's tags and date.
 
 ## page-header.tsx
 
@@ -204,7 +208,7 @@ It also sets the browser tab title, through `usePageTitle` in `lib/page-title.ts
 
 ## section-heading.tsx
 
-`SectionHeading` for a section title inside a page that is not in a `SectionCard`, such as the note's "Backlinks". Markdown `h2` in a note body renders through it too, so both look the same. It takes children and heading attributes such as `id`, and sets no margins. It is title-large (22px) in on-surface over a 1px outline-variant rule.
+`SectionHeading` for a section title inside a page that is not in a `SectionCard`, such as the note's "Backlinks". Markdown `h2` in a note body renders through it too, so both look the same. It takes children and heading attributes such as `id`, and sets no margins. It is title-large (22px) in on-surface over a 1px outline-variant rule. `action` puts one small control at the right end of the title's line, above the same rule and outside the `h2`, so the heading is named by its title alone; Home's Domains passes its "Open index" text button. The rule stays where it is without one.
 
 ## callout.tsx
 
@@ -243,17 +247,19 @@ A notice has no border: its tone's container colour sets it apart, with 16px pad
 
 ## layout.tsx
 
-`Layout` is the shell around every page but the print page. It mounts `SearchShortcutProvider`, `PinsProvider`, and `HistoryProvider` once, and the toasts, which show as snackbars at the bottom centre. The shell follows the M3 window size classes:
+`Layout` is the shell around every page but the print page. It mounts `SearchShortcutProvider`, `PinsProvider`, `DomainsProvider`, and `HistoryProvider` once, and the toasts, which show as snackbars at the bottom centre. The shell follows the M3 window size classes:
 
 - **Compact** (under 600px). A 64px top app bar holds the menu button, the brand mark, Back and Forward, and the search bar. The menu button opens the modal navigation drawer.
-- **Medium** (600 to 839px). A navigation rail, 80px wide, runs down the left: the menu button at the top, then the seven destinations, each an icon in a 56×32 indicator with its label under it. The indicator fills with the secondary container on the current page. Pinned notes are in the modal drawer only. The top app bar holds Back and Forward and the search bar.
-- **Expanded and up** (840px and wider). A standard navigation drawer, 18rem wide and the full height of the window, on surface-container-low: the brand, the destinations as 56px pills, and the Pinned group (see `pins.tsx`). The top app bar is the same as at medium.
-- **The modal drawer** (the Sheet) shows the brand, the destinations, and the Pinned group with the standard drawer's item styles. Opening it focuses Close. Closing it returns focus to the menu button that opened it, the rail's or the top app bar's.
+- **Medium** (600 to 839px). A navigation rail, 80px wide, runs down the left: the menu button at the top, then the seven destinations, each an icon in a 56×32 indicator with its label under it. The indicator fills with the secondary container on the current page. Domains and pinned notes are in the modal drawer only. The top app bar holds Back and Forward and the search bar.
+- **Expanded and up** (840px and wider). A standard navigation drawer, 18rem wide and the full height of the window, on surface-container-low: the brand, the destinations as 56px pills, the Domains group, and the Pinned group (see `pins.tsx`). The top app bar is the same as at medium.
+- **The modal drawer** (the Sheet) shows the brand, the destinations, the Domains group, and the Pinned group with the standard drawer's item styles. Opening it focuses Close. Closing it returns focus to the menu button that opened it, the rail's or the top app bar's.
 - **The top app bar** sticks to the top on surface, and takes surface-container once the page is scrolled.
+
+**Domains.** Between the destinations and the pins, both drawers show a `nav` named "Domains" with the same title-small section headline as Pinned: one 56px row per domain from `useDomains()`, in the root hub's order, each a link to the domain's hub with a 24px letter avatar (secondary container) and the title in label-large, cut at two lines. The domain whose hub is open gets the destinations' active colours from the same `navStateClass`. Nothing shows while the domains load, when they fail, or when the root hub lists none; Home is where a failure is reported.
 
 The rail and the standard drawer each render the destinations as a `nav` named "Main". Each is `hidden` outside its window class, which takes it out of the accessibility tree, so assistive tech finds one "Main" nav at a time; the modal drawer's copy exists only while it is open, and the page behind it is hidden then. jsdom applies no CSS, so tests find both and pick one by `data-slot`: `navigation-rail`, `navigation-drawer`, or `top-app-bar`.
 
-The main column stays 52rem wide, 80rem on a note page. A note's outline moves beside the text from the large window class (1200px) up, the first width where both fit beside the drawer.
+The main column stays 52rem wide, 80rem on a note page and on Home (the `.note-page` and `.home-page` rules in `index.css`). A note's outline moves beside the text from the large window class (1200px) up, the first width where both fit beside the drawer.
 
 ## search-input.tsx
 
@@ -285,7 +291,7 @@ The owner's pins: notes, hubs, or sources pinned to Home, to the sidebar, or bot
 
 `PinsProvider` is mounted once, in `layout.tsx`, the same way `SearchShortcutProvider` is. It loads `GET /api/pins` once and holds the one copy that every menu, Home's Pinned section, and the sidebar read. `usePins()` returns:
 
-- `lists`: `{ home, sidebar }`, each a list of `NoteRef` in pin order.
+- `lists`: `{ home, sidebar }`, each a list of `PinnedNote` in pin order: the `NoteRef` (slug, title, type) plus the note's `tags`. Every pin the server sends carries them; a pin still on its way carries them when the note it was made from did. Home's Pinned rows read them for the domain.
 - `isPinned(slug, target)`.
 - `setPin(note, target, pinned)`: `PUT /api/pins/:target` with `{ slug, pinned }`. Pinning appends to the end of the list, as the server does.
 - `move(slug, target, "up" | "down")`: swaps the note with its neighbour and sends `PUT /api/pins/:target/order` with every slug in the new order. A move past either end sends nothing.
@@ -301,15 +307,27 @@ Outside a `PinsProvider`, `usePins` throws.
 
 Where pins show:
 
-- **Home.** A "Pinned" section under the header, above the stats, the Recent section, and the root hub's content: a `SectionHeading` and compact `NoteCard`s in pin order. Each card's menu adds Move up and Move down. With no Home pins the section does not render.
-- **Navigation drawers.** A "Pinned" group under the destinations (a `nav` named "Pinned", headed in title-small), in the standard drawer and the modal drawer alike; the rail has none. Each row is a link with a 24px type icon (note, hub, source) and the title in label-large, cut at two lines with an ellipsis (`line-clamp-2`), so a row is 56px tall like a destination; the full title stays the link's accessible name and its tooltip. The current note's link gets the destinations' active colours, the secondary container, from the same `navStateClass`. Each row has a 32px `NoteActionsMenu` at its right, shown on hover, while the row holds focus, while its menu is open, and always on devices without hover; that menu is where a sidebar pin is moved or unpinned. With no sidebar pins the group does not render. The drawer's link area scrolls up and down when the pins outgrow the screen, never sideways.
+- **Home.** A "Pinned" section in the main column under the Domains: a `SectionHeading` and `NoteRow`s in pin order, in two columns once the column is 40rem wide. Each row's supporting line is the note's domain tag as `TagName` (the first of its tags that a domain carries), or nothing for a note in no domain. Each row's menu adds Move up and Move down. With no Home pins the section does not render.
+- **Navigation drawers.** A "Pinned" group under the Domains (a `nav` named "Pinned", headed in title-small), in the standard drawer and the modal drawer alike; the rail has none. Each row is a link with a 24px type icon (note, hub, source) and the title in label-large, cut at two lines with an ellipsis (`line-clamp-2`), so a row is 56px tall like a destination; the full title stays the link's accessible name and its tooltip. The current note's link gets the destinations' active colours, the secondary container, from the same `navStateClass`. Each row has a 32px `NoteActionsMenu` at its right, shown on hover, while the row holds focus, while its menu is open, and always on devices without hover; that menu is where a sidebar pin is moved or unpinned. With no sidebar pins the group does not render. The drawer's link area scrolls up and down when the pins outgrow the screen, never sideways.
+
+## domains.tsx
+
+The brain's domains are the hubs the root hub `index` links to, in the order it lists them. `DomainsProvider`, mounted once in `layout.tsx` beside `PinsProvider`, loads them once for the whole app, and `useDomains()` returns `{ status, error, domains, retry }`, which Home's cards and the drawer's Domains group both read (outside the provider it throws). It asks for `GET /api/notes/index` first; a 404 there makes the status `missing`, with nothing else requested. Otherwise it asks for every hub (`GET /api/notes?type=hub&limit=500`) and the tag counts (`GET /api/tags`) together, and `buildDomains` turns the root hub's links into one `Domain` per link that is a hub: its slug, title, and updated date; its `tag`, the hub's tag named like its slug, or else its first tag; `count`, the number of notes carrying that tag; and `subHubs`, the other hubs carrying the tag (never `index` or another domain), by title. A link to a plain note or to a missing slug is skipped. Any failed request makes the status `error`, and `retry` asks again for all of it. `DomainAvatar` is the domain's first letter on a round secondary-container avatar, 24px in the drawer and 40px on a card. `DomainCard` is one domain as an M3 filled card (`surface-container-highest`, 12px corners, no border or shadow) that opens the hub when clicked anywhere: the 40px avatar, the title (`TextLink` `card`, stretched over the card), "updated <date>", the sub-hubs as `NoteChip`s, and a text button "<count> notes" to the tag page. The chips and the button sit above the card's link, so each opens its own page.
+
+## Home
+
+`pages/home.tsx` is titled "Home" (the tab reads "notes++") with no description. Below the large window class it is one column; from 1200px a main column sits beside a 22rem supporting pane, which scrolls with the page because Recent can grow past the screen. Sections sit 32px apart, each under a `SectionHeading`.
+
+- **Main column.** Domains, with an "Open index" text button at the right of its heading that opens the root hub (shown once the domains load): one `DomainCard` per domain, one column, two once the column is 36rem wide. While they load, placeholder bars; with no root hub, the "No root hub yet" info notice; with no hub links, "No domains yet." Then Pinned (see `pins.tsx`). Home no longer renders the root hub's own text; "Open index" reaches it.
+- **Supporting pane.** Recent (see `recent-notes.tsx`); then Bookmarks, one `LinkRow` per group from `GET /api/bookmarks`, the name with hyphens as spaces and its note count, opening `/bookmarks#<bookmarkGroupId>`, and left out when there are no groups or the request fails; then Stats, three `LinkRow`s, Notes, Files, and Invalid notes, opening Tags, Files, and Check, with the invalid count in the error colour once it is above 0.
+- **Errors.** One `ErrorAlert` stands for the domains and the stats: in the Domains spot when the domains failed, otherwise in the Stats spot. Its Try again reloads whichever failed, the domains through `useDomains().retry` and the stats through their own reload.
 
 ## note-actions-menu.tsx
 
-`NoteActionsMenu` (`note`, `pinnedList`, `onRemovedFromList`, `size`) is the three-dot menu for one note. It is the only importer of `ui/dropdown-menu`. The note page header, every note card (search results, the Tag page, Backlinks, Home's Pinned and Recent sections), and each sidebar pin use it.
+`NoteActionsMenu` (`note`, `pinnedList`, `onRemovedFromList`, `size`) is the three-dot menu for one note. It is the only importer of `ui/dropdown-menu`. The note page header, every note card and note row (search results, the Tag page, Backlinks, the Bookmarks page, Home's Pinned and Recent sections), and each sidebar pin use it.
 
 - **Trigger.** A standard icon button with `EllipsisVertical` in on-surface-variant, named "More actions for <title>". `size="default"` is 40px, for cards and headers; `size="small"` is 32px, for a pinned row in a navigation drawer.
-- **Items.** "Pin to Home" and "Pin to sidebar" are checkbox items, checked while pinned. With `pinnedList`, a separator and "Move up" and "Move down" follow, the first disabled for the top pin and the second for the bottom one. After another separator comes "Export as".
+- **Items.** "Pin to Home" and "Pin to sidebar" are checkbox items, checked while pinned. After a separator comes "Bookmark", which opens `BookmarkAssignment`'s dialog (see `bookmarks.tsx`). With `pinnedList`, a separator and "Move up" and "Move down" follow, the first disabled for the top pin and the second for the bottom one. With `bookmarkOrder` (`group`, `index`, `count`, `onMove`), a separator and "Move up in <group>" and "Move down in <group>" follow, disabled the same way; the Bookmarks page passes it while its sort is Manual order. After another separator comes "Export as".
 - **Keyboard.** Radix handles the keys: Enter, Space, or ArrowDown opens the menu, the arrow keys move through it, and Escape closes it. After an item runs, focus goes back to the trigger with `preventScroll`, so toggling a pin never moves the page.
 - **Not modal.** The page behind an open menu stays readable by screen readers and scrollable, and nothing locks the page's scrolling. A click or Tab outside closes the menu and leaves focus where it went.
 - **A row that removes itself.** Unpinning a note from the list its menu sits in removes the menu's own row. `usePinnedListFocus(count)` returns `listRef`, for the element around the rows, and `rowRemoved(index)`, for that row's `onRemovedFromList`. Focus then moves to the menu button of the row that took its place, or of the new last row.
@@ -325,6 +343,33 @@ Where pins show:
   - On 503 `pdf_unavailable`, the print page opens in a new tab with `?autoprint=1` and the toast turns into "Opening the print dialog; choose Save as PDF". If the browser blocks the tab, the toast gets an "Open print page" button.
   - On any other error, the toast gives "Could not export <title> as PDF" with the server's message.
   - While one PDF export of a note runs, the PDF item in every menu for that note is disabled with `aria-busy` and a spinner, and another export of it does nothing.
+
+## bookmarks.tsx
+
+Bookmark groups are named lists of note slugs in `bookmarks.yml` (DECISIONS.md, 2026-09-23). Group names are slugs ("fields-sales"); every screen shows them with the hyphens as spaces ("fields sales").
+
+- `BookmarkAssignment` (`note`) is the Bookmark item in `NoteActionsMenu`: a text button that opens an M3 basic dialog titled "Bookmark “<title>”", with a checkbox row per group (checked where the note already is), a "New bookmark group" field with an "Add to new group" icon button, then Cancel and Save.
+- `NewGroupDialog` (`onCreated`) is the Bookmarks page's tonal "New group" button and its basic dialog: a "Group name" field, then Cancel and Create text buttons. Create is disabled while the field is blank or the request runs, and Enter in the field submits. On success it hands the server's lists to `onCreated`, toasts "Bookmark group created", and closes, and focus goes back to the button. When the server refuses, its message shows as an error toast and the dialog stays open.
+- `bookmarkGroupId(name)` is a group's section id on the Bookmarks page, `bookmark-group-<name>`. A link to `/bookmarks#bookmark-group-<name>` opens that group.
+- `bookmarkGroupNotes(group, notes)` returns the group's notes in the group's order, skipping slugs that are not among `notes`.
+
+### The Bookmarks page
+
+`pages/bookmarks.tsx` loads `GET /api/bookmarks` and `GET /api/notes?limit=500`, and shows placeholder bars until both answer. If either fails, an `ErrorAlert` takes the page's place, and its Try again reloads the one that failed.
+
+- **Header.** "Bookmarks", the group count as `aside` ("2 groups"), and `NewGroupDialog` in `actions`. With no groups the page reads "No bookmark groups yet." and the header still offers New group.
+- **Toolbar.** Right-aligned under the header, shown while there are groups: the sort chip ("Manual order", the default, "Title A to Z", "Recently added", "Recently updated") and the `ViewSwitch`.
+- **Groups.** Each group is a `section` with the `bookmarkGroupId` id, with an `outline-variant` divider between groups. Its first row is an M3 list subheader inside an `h2`: one 56px button with `aria-expanded` that opens and closes the group (folder icon, the name in title-medium, the note count, the chevron), then `GroupActionsMenu`, whose moves send `PUT /api/bookmarks/order`. From the medium window class the open group's notes are indented 40px, so they start under the group's name.
+- **Views.** Each shows a different amount of each note:
+  - list: `NoteRow`s with the title alone
+  - details: `NoteRow`s with the summary as the supporting line and "updated <date>" as trailing text
+  - tiles: compact `NoteCard`s (title and kind) in a grid, 1 column, 2 from the medium window class, 3 from large
+  - content: `ItemCard`s with the summary, the tags as `TagBadges`, and "created <date>" and "updated <date>"
+
+  Every note keeps its `NoteActionsMenu`, with `bookmarkOrder` while the sort is Manual order; a move sends `PUT /api/bookmarks/:group/order`. A failed move is taken back and shows an error toast.
+- **An empty group** reads "No notes in this group." and "Choose Bookmark in a note's three-dot menu to add it here."
+- **Remembered.** The view, the sort, and which groups are open live in local storage under `notesplusplus.bookmarks.preferences`. With nothing saved, every group starts open.
+- **Links to a group.** When the page opens with `#bookmark-group-<name>`, that group opens even if it was saved closed, and the page scrolls to it once its notes have rendered. This happens once per history entry, so closing the group afterwards sticks. `scroll-mt-20` keeps the group's row clear of the top app bar.
 
 ## Print page
 
@@ -353,7 +398,7 @@ Every keycap. It is the only module that renders a `<kbd>` element.
 ## page-state.tsx
 
 - `LoadingBlock` for placeholder bars while something loads.
-- `ErrorAlert` for an API error or the "server not reachable" hint, built on `Notice` with the danger tone. `onRetry` adds a small outlined "Try again" button inside the notice, under the message. Every page that loads data passes it: `reload` from `lib/use-async.ts`, or `retry` from `lib/use-paged-list.ts` on the Tag page, which fetches the page that failed again. Retrying shows the loading state, then the result in the notice's place. Where one notice stands for several requests, its retry reloads each one that failed: the note page reloads the note plus its backlinks and trail, Home the hub plus the stats. The Inbox form's "Could not add" notice has no retry; the form is resubmitted instead.
+- `ErrorAlert` for an API error or the "server not reachable" hint, built on `Notice` with the danger tone. `onRetry` adds a small outlined "Try again" button inside the notice, under the message. Every page that loads data passes it: `reload` from `lib/use-async.ts`, or `retry` from `lib/use-paged-list.ts` on the Tag page, which fetches the page that failed again. Retrying shows the loading state, then the result in the notice's place. Where one notice stands for several requests, its retry reloads each one that failed: the note page reloads the note plus its backlinks and trail, Home the domains plus the stats. The Inbox form's "Could not add" notice has no retry; the form is resubmitted instead.
 - `EmptyState` for an empty list: one centred line in `text-body-medium` `on-surface-variant`.
 - `NotFoundState` (`title`, `message`, `value`) for the note 404 and the not-found page: Home breadcrumbs, the title, one sentence ending in the missing value as code, and a tonal "Back home" button that is a link to `/`.
 

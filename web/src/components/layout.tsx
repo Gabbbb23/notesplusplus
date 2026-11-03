@@ -1,21 +1,20 @@
 import {
   CheckCircle2Icon,
-  FileTextIcon,
   FolderIcon,
   HomeIcon,
   InboxIcon,
   MenuIcon,
-  NetworkIcon,
-  ScrollTextIcon,
   SearchIcon,
   TagIcon,
   BookmarkIcon,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useId, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate, useSearchParams } from "react-router";
+import { DomainAvatar, DomainsProvider, useDomains } from "@/components/domains";
 import { HistoryNav, HistoryProvider } from "@/components/history-nav";
 import { NoteActionsMenu, usePinnedListFocus } from "@/components/note-actions-menu";
+import { NOTE_TYPE_ICON } from "@/components/note-row";
 import { PinsProvider, usePins } from "@/components/pins";
 import { SearchInput } from "@/components/search-input";
 import { SearchShortcutProvider } from "@/components/search-shortcut";
@@ -24,14 +23,13 @@ import { Ripple } from "@/components/ui/ripple";
 import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Toaster } from "@/components/ui/sonner";
 import { noteUrl } from "@/lib/api";
-import type { NoteType } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /*
  * The app shell, by M3 window size class. Compact: a top app bar with the menu button, the brand mark,
  * Back and Forward, and the search bar; the menu opens the modal navigation drawer. Medium: a
  * navigation rail with the same menu button at its top. Expanded and up: a standard navigation drawer
- * with the pinned notes under the destinations. The rail and the standard drawer each render the
+ * with the domains and the pinned notes under the destinations. The rail and the standard drawer each render the
  * destinations, and `hidden` with display variants keeps the one not in use out of the accessibility
  * tree, so assistive tech always finds a single "Main" nav.
  */
@@ -132,30 +130,64 @@ function NavLinks({ layout, onNavigate }: { layout: "drawer" | "rail"; onNavigat
   );
 }
 
-const TYPE_ICON: Record<NoteType, LucideIcon> = {
-  note: FileTextIcon,
-  hub: NetworkIcon,
-  source: ScrollTextIcon,
-};
+/** A titled group of drawer links under the destinations: a `nav` named by its title-small section headline. */
+function DrawerSection({ label, children }: { label: string; children: ReactNode }) {
+  const labelId = useId();
+  return (
+    <nav aria-labelledby={labelId} className="mt-2">
+      <div id={labelId} className="flex h-14 items-center px-4 text-title-small text-on-surface-variant">
+        {label}
+      </div>
+      {children}
+    </nav>
+  );
+}
 
 /**
- * The notes pinned to the sidebar, under the destinations: a type icon and the title, at most two
+ * The domains the root hub lists, under the destinations: a letter avatar and the title, linking to
+ * the domain's hub. Nothing at all while they load, when they fail, or when there are none.
+ */
+function DomainLinks({ onNavigate }: { onNavigate?: () => void }) {
+  const { domains } = useDomains();
+  if (domains.length === 0) return null;
+  return (
+    <DrawerSection label="Domains">
+      <ul className="flex flex-col">
+        {domains.map((domain) => (
+          <li key={domain.slug}>
+            <NavLink
+              to={noteUrl(domain.slug)}
+              onClick={onNavigate}
+              data-slot="domain-link"
+              className={({ isActive }) =>
+                cn("relative flex min-h-14 min-w-0 items-center gap-3 rounded-full px-4 py-2 text-label-large", navStateClass(isActive))
+              }
+            >
+              <DomainAvatar title={domain.title} size="small" />
+              <span className="line-clamp-2 min-w-0 wrap-anywhere">{domain.title}</span>
+              <Ripple />
+            </NavLink>
+          </li>
+        ))}
+      </ul>
+    </DrawerSection>
+  );
+}
+
+/**
+ * The notes pinned to the sidebar, under the domains: a type icon and the title, at most two
  * lines, in pin order. Each row's menu (shown on hover or focus) pins, unpins, and moves it.
  * Nothing at all while there are none.
  */
 function PinnedLinks({ onNavigate }: { onNavigate?: () => void }) {
   const notes = usePins().lists.sidebar;
-  const labelId = useId();
   const { listRef, rowRemoved } = usePinnedListFocus<HTMLUListElement>(notes.length);
   if (notes.length === 0) return null;
   return (
-    <nav aria-labelledby={labelId} className="mt-2">
-      <div id={labelId} className="flex h-14 items-center px-4 text-title-small text-on-surface-variant">
-        Pinned
-      </div>
+    <DrawerSection label="Pinned">
       <ul ref={listRef} className="flex flex-col">
         {notes.map((note, index) => {
-          const Icon = TYPE_ICON[note.type];
+          const Icon = NOTE_TYPE_ICON[note.type];
           return (
             <li key={note.slug} className="group/pin relative">
               {/* Two lines of label-large and 8px above and below make a 56px row, the height of a one-line item. */}
@@ -188,7 +220,7 @@ function PinnedLinks({ onNavigate }: { onNavigate?: () => void }) {
           );
         })}
       </ul>
-    </nav>
+    </DrawerSection>
   );
 }
 
@@ -275,89 +307,93 @@ export function Layout() {
   const scrolled = usePageScrolled();
 
   return (
-    // Mounts the one Alt+K listener and the registry that the search fields join, the one copy of the pins,
-    // and the history position and scroll memory behind Back and Forward.
+    // Mounts the one Alt+K listener and the registry that the search fields join, the one copy of the pins
+    // and of the domains, and the history position and scroll memory behind Back and Forward.
     <SearchShortcutProvider>
       <PinsProvider>
-        <HistoryProvider>
-          <Sheet open={open} onOpenChange={setOpen}>
-            <div className="min-h-screen medium:flex">
-              <aside
-                data-slot="navigation-rail"
-                className="sticky top-0 hidden h-screen w-20 shrink-0 flex-col items-center bg-surface medium:flex expanded:hidden"
-              >
-                <div className="flex h-16 shrink-0 items-center">
-                  <MenuButton onOpen={rememberOpener} />
-                </div>
-                {/* The inset leaves room for each item's focus outline inside the scrolling area. */}
-                <div className="min-h-0 w-full flex-1 overflow-x-hidden overflow-y-auto p-1.5">
-                  <NavLinks layout="rail" />
-                </div>
-              </aside>
+        <DomainsProvider>
+          <HistoryProvider>
+            <Sheet open={open} onOpenChange={setOpen}>
+              <div className="min-h-screen medium:flex">
+                <aside
+                  data-slot="navigation-rail"
+                  className="sticky top-0 hidden h-screen w-20 shrink-0 flex-col items-center bg-surface medium:flex expanded:hidden"
+                >
+                  <div className="flex h-16 shrink-0 items-center">
+                    <MenuButton onOpen={rememberOpener} />
+                  </div>
+                  {/* The inset leaves room for each item's focus outline inside the scrolling area. */}
+                  <div className="min-h-0 w-full flex-1 overflow-x-hidden overflow-y-auto p-1.5">
+                    <NavLinks layout="rail" />
+                  </div>
+                </aside>
 
-              <aside
-                data-slot="navigation-drawer"
-                className="sticky top-0 hidden h-screen w-72 shrink-0 flex-col bg-surface-container-low expanded:flex"
+                <aside
+                  data-slot="navigation-drawer"
+                  className="sticky top-0 hidden h-screen w-72 shrink-0 flex-col bg-surface-container-low expanded:flex"
+                >
+                  <div className="flex h-16 shrink-0 items-center px-3">
+                    <Brand />
+                  </div>
+                  <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-3 pb-3">
+                    <NavLinks layout="drawer" />
+                    <DomainLinks />
+                    <PinnedLinks />
+                  </div>
+                  <div className="px-7 py-4 text-body-small text-on-surface-variant">The agent writes the notes.</div>
+                </aside>
+
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <header
+                    data-slot="top-app-bar"
+                    className={cn(
+                      "sticky top-0 z-10 flex h-16 items-center gap-2 px-2 transition-colors duration-200 ease-standard medium:px-4 expanded:px-6",
+                      scrolled ? "bg-surface-container" : "bg-surface",
+                    )}
+                  >
+                    <MenuButton className="medium:hidden" onOpen={rememberOpener} />
+                    <div className="medium:hidden">
+                      <Brand markOnly />
+                    </div>
+                    <HistoryNav className="flex shrink-0 items-center gap-1" />
+                    <TopSearch className="ml-auto w-full max-w-md min-w-0" />
+                  </header>
+
+                  <main className="mx-auto w-full max-w-[52rem] flex-1 px-4 py-8 medium:px-6">
+                    <Outlet />
+                  </main>
+                </div>
+              </div>
+
+              <SheetContent
+                side="left"
+                className="gap-0 px-3"
+                // Radix focuses the first button that is not a link, which is now a pinned row's menu. Keep it on Close.
+                onOpenAutoFocus={(event) => {
+                  const closeButton = (event.currentTarget as HTMLElement).querySelector<HTMLElement>("[data-slot='sheet-close-button']");
+                  if (!closeButton) return;
+                  event.preventDefault();
+                  closeButton.focus();
+                }}
+                onCloseAutoFocus={(event) => {
+                  event.preventDefault();
+                  opener.current?.focus();
+                }}
               >
-                <div className="flex h-16 shrink-0 items-center px-3">
+                <SheetTitle className="sr-only">Navigation</SheetTitle>
+                <SheetDescription className="sr-only">Pages of the notes app</SheetDescription>
+                <div className="flex h-16 shrink-0 items-center">
                   <Brand />
                 </div>
-                <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-3 pb-3">
-                  <NavLinks layout="drawer" />
-                  <PinnedLinks />
+                <div className="-mx-3 min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-3 pb-3">
+                  <NavLinks layout="drawer" onNavigate={close} />
+                  <DomainLinks onNavigate={close} />
+                  <PinnedLinks onNavigate={close} />
                 </div>
-                <div className="px-7 py-4 text-body-small text-on-surface-variant">The agent writes the notes.</div>
-              </aside>
-
-              <div className="flex min-w-0 flex-1 flex-col">
-                <header
-                  data-slot="top-app-bar"
-                  className={cn(
-                    "sticky top-0 z-10 flex h-16 items-center gap-2 px-2 transition-colors duration-200 ease-standard medium:px-4 expanded:px-6",
-                    scrolled ? "bg-surface-container" : "bg-surface",
-                  )}
-                >
-                  <MenuButton className="medium:hidden" onOpen={rememberOpener} />
-                  <div className="medium:hidden">
-                    <Brand markOnly />
-                  </div>
-                  <HistoryNav className="flex shrink-0 items-center gap-1" />
-                  <TopSearch className="ml-auto w-full max-w-md min-w-0" />
-                </header>
-
-                <main className="mx-auto w-full max-w-[52rem] flex-1 px-4 py-8 medium:px-6">
-                  <Outlet />
-                </main>
-              </div>
-            </div>
-
-            <SheetContent
-              side="left"
-              className="gap-0 px-3"
-              // Radix focuses the first button that is not a link, which is now a pinned row's menu. Keep it on Close.
-              onOpenAutoFocus={(event) => {
-                const closeButton = (event.currentTarget as HTMLElement).querySelector<HTMLElement>("[data-slot='sheet-close-button']");
-                if (!closeButton) return;
-                event.preventDefault();
-                closeButton.focus();
-              }}
-              onCloseAutoFocus={(event) => {
-                event.preventDefault();
-                opener.current?.focus();
-              }}
-            >
-              <SheetTitle className="sr-only">Navigation</SheetTitle>
-              <SheetDescription className="sr-only">Pages of the notes app</SheetDescription>
-              <div className="flex h-16 shrink-0 items-center">
-                <Brand />
-              </div>
-              <div className="-mx-3 min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-3 pb-3">
-                <NavLinks layout="drawer" onNavigate={close} />
-                <PinnedLinks onNavigate={close} />
-              </div>
-            </SheetContent>
-          </Sheet>
-        </HistoryProvider>
+              </SheetContent>
+            </Sheet>
+          </HistoryProvider>
+        </DomainsProvider>
         <Toaster position="bottom-center" />
       </PinsProvider>
     </SearchShortcutProvider>

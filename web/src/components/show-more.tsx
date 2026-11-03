@@ -60,13 +60,14 @@ export function ShowMoreLimit({ children }: { children: ReactNode }) {
 }
 
 const FOCUSABLE = "a[href], button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex='-1'])";
+const ITEM = "[data-slot='item-card'], [data-slot='link-row']";
 
 /**
  * Moves focus into the first card that "show more" added, so a keyboard user carries on from the
  * new results instead of from a button that has moved below them.
  *
- * Put `listRef` on the element around the cards (`ItemCard`s) and call `expectMore()` when the
- * button is clicked. `count` is the number of cards rendered now; once it grows past the count at
+ * Put `listRef` on the element around the cards (`ItemCard`s) or list rows (`LinkRow`s) and call
+ * `expectMore()` when the button is clicked. `count` is the number of cards rendered now; once it grows past the count at
  * the click, focus goes to the first link or button in the first new card. `listKey` names the
  * list (the query, the tag): when it changes, the pending focus is dropped, so a new search never
  * takes the focus away from the form.
@@ -84,7 +85,7 @@ export function useFocusFirstNew(count: number, listKey: string) {
     }
     if (count <= wanted.from) return;
     pending.current = null;
-    const card = listRef.current?.querySelectorAll<HTMLElement>("[data-slot='item-card']")[wanted.from];
+    const card = listRef.current?.querySelectorAll<HTMLElement>(ITEM)[wanted.from];
     if (!card) return;
     const target = card.querySelector<HTMLElement>(FOCUSABLE);
     if (target) {

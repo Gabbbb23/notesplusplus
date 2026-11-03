@@ -98,7 +98,7 @@ describe("pageTitle", () => {
 
 describe("every page sets the tab title", () => {
   it.each([
-    ["/", "Index", "notes++"],
+    ["/", "Home", "notes++"],
     ["/notes/college", "College", "College · notes++"],
     ["/search?q=rizal", "Search", "Search: rizal · notes++"],
     ["/search", "Search", "Search · notes++"],
