@@ -4,6 +4,7 @@
  */
 import fs from "node:fs/promises";
 import path from "node:path";
+import { encode } from "@toon-format/toon";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
@@ -28,6 +29,7 @@ import {
 } from "../core/contract/index.ts";
 import type { LinkReport, NotePage, NoteSummary, PinnedNotes, SearchResult } from "../core/types.ts";
 import type { BrainClient } from "./client.ts";
+import { structuredOutput } from "./output.ts";
 
 export interface McpServerOptions {
   /** Folder holding conventions.md, file.md, garden.md. */
@@ -73,12 +75,10 @@ export function createMcpServer(client: BrainClient, opts: McpServerOptions): Mc
     },
     guard(async ({ query, limit, ...filters }) => {
       const { results, hasMore } = await client.search(query, { ...filters, limit: limit ?? SEARCH_DEFAULT_LIMIT });
-      const lines = results.map(formatSearchResult);
-      if (hasMore) lines.push(`More results exist; raise limit (max ${SEARCH_LIMIT.max}) or refine the query.`);
-      return {
-        content: [{ type: "text", text: results.length === 0 ? "No results." : lines.join("\n") }],
-        structuredContent: { results, hasMore },
-      };
+      return structuredOutput(
+        { results, hasMore },
+        encode({ results: results.map(({ kind, id, title, summary, snippet, type }) => ({ kind, id, title, summary, snippet, type })), hasMore }),
+      );
     }),
   );
 
@@ -111,7 +111,10 @@ export function createMcpServer(client: BrainClient, opts: McpServerOptions): Mc
     },
     guard(async ({ limit, ...rest }) => {
       const page = await client.list({ ...rest, limit: limit ?? LIST_NOTES_DEFAULT_LIMIT });
-      return text(formatNotePage(page));
+      return structuredOutput(
+        page,
+        encode({ count: page.total, offset: page.offset, notes: page.items.map(({ slug, title, summary }) => ({ slug, title, summary })) }),
+      );
     }),
   );
 
@@ -203,7 +206,7 @@ export function createMcpServer(client: BrainClient, opts: McpServerOptions): Mc
     },
     guard(async () => {
       const tags = await client.tags();
-      return text(tags.length === 0 ? "No tags." : tags.map((t) => `${t.name} — ${t.description}`).join("\n"));
+      return structuredOutput({ tags }, tags.length === 0 ? "No tags." : tags.map((t) => `${t.name} — ${t.description}`).join("\n"));
     }),
   );
 
@@ -234,7 +237,10 @@ export function createMcpServer(client: BrainClient, opts: McpServerOptions): Mc
     },
     guard(async () => {
       const pins = await client.pins();
-      return { content: [{ type: "text", text: formatPins(pins) }], structuredContent: pins };
+      return structuredOutput(
+        pins,
+        encode({ home: pins.home.map(({ slug, type, title }) => ({ slug, type, title })), sidebar: pins.sidebar.map(({ slug, type, title }) => ({ slug, type, title })) }),
+      );
     }),
   );
 
@@ -251,7 +257,7 @@ export function createMcpServer(client: BrainClient, opts: McpServerOptions): Mc
     },
     guard(async ({ slug, target, pinned }) => {
       const pins = await client.setPin(slug, target, pinned);
-      return text(`${slug} is ${pinned ? "" : "not "}pinned to ${target}.\n${formatPins(pins)}`);
+      return structuredOutput({ slug, target, pinned, pins }, encode({ slug, target, pinned, pins }));
     }),
   );
 
@@ -264,10 +270,9 @@ export function createMcpServer(client: BrainClient, opts: McpServerOptions): Mc
     },
     guard(async () => {
       const items = await client.inboxList();
-      return text(
-        items.length === 0
-          ? "Inbox is empty."
-          : items.map((i) => `${i.name} — ${i.sizeBytes} bytes — ${i.isText ? "text" : "binary"}`).join("\n"),
+      return structuredOutput(
+        { items },
+        items.length === 0 ? "Inbox is empty." : items.map((i) => `${i.name} — ${i.sizeBytes} bytes — ${i.isText ? "text" : "binary"}`).join("\n"),
       );
     }),
   );
@@ -304,7 +309,10 @@ export function createMcpServer(client: BrainClient, opts: McpServerOptions): Mc
         "Report broken wikilinks, missing attachments, missing sources, files that fail to parse, pins whose note is gone, notes of type note that no hub lists, and notes listed by more than one hub. Run it after filing or gardening and fix everything it lists.",
       annotations: { readOnlyHint: true },
     },
-    guard(async () => text(formatLinkReport(await client.checkLinks()))),
+    guard(async () => {
+      const report = await client.checkLinks();
+      return structuredOutput(report, formatLinkReport(report));
+    }),
   );
 
   server.registerTool(
@@ -316,7 +324,7 @@ export function createMcpServer(client: BrainClient, opts: McpServerOptions): Mc
     },
     guard(async () => {
       const s = await client.stats();
-      return text(`notes: ${s.notes}\nfiles: ${s.files}\ninvalid: ${s.invalid}`);
+      return structuredOutput(s, `notes: ${s.notes}\nfiles: ${s.files}\ninvalid: ${s.invalid}`);
     }),
   );
 

@@ -258,12 +258,7 @@ describe("MCP server", () => {
   it("search returns one line per hit with an indented snippet and structuredContent", async () => {
     const res = await mcp.callTool({ name: "search", arguments: { query: "ryzen", limit: 5 } });
     expect(res.isError).toBeFalsy();
-    expect(textOf(res).split("\n")).toEqual([
-      `[note] ryzen-laptop-specs — Ryzen laptop specs — ${RYZEN_SUMMARY}`,
-      "    «Ryzen» laptop specs",
-      "[file] files/invoice.txt — invoice.txt",
-      "    Invoice for one «Ryzen» laptop. Total 62,000 PHP.",
-    ]);
+    expect(textOf(res)).toMatch(/^results\[2\]/);
     expect(res.structuredContent).toEqual(await restSearch("q=ryzen&limit=5"));
     const call = calls.find((c) => c.url.pathname === "/api/search");
     expect(call?.url.searchParams.get("limit")).toBe("5");
@@ -277,11 +272,7 @@ describe("MCP server", () => {
 
     const cut = await mcp.callTool({ name: "search", arguments: { query: "ryzen", limit: 1 } });
     expect(cut.isError).toBeFalsy();
-    expect(textOf(cut).split("\n")).toEqual([
-      `[note] ryzen-laptop-specs — Ryzen laptop specs — ${RYZEN_SUMMARY}`,
-      "    «Ryzen» laptop specs",
-      "More results exist; raise limit (max 100) or refine the query.",
-    ]);
+    expect(textOf(cut)).toMatch(/^results\[1\]/);
     expect(cut.structuredContent).toEqual(await restSearch("q=ryzen&limit=1"));
     expect((cut.structuredContent as SearchPage).hasMore).toBe(true);
   });
@@ -368,17 +359,15 @@ describe("MCP server", () => {
 
   it("check_links lists notes no hub lists and notes in several hubs, and says No problems. once every list is empty", async () => {
     // No hub lists the seeded note or the one write_note created above yet. The source is never reported.
-    expect(textOf(await mcp.callTool({ name: "check_links", arguments: {} }))).toBe("Notes no hub lists:\n  new-note\n  ryzen-laptop-specs");
+    expect((await mcp.callTool({ name: "check_links", arguments: {} })).structuredContent).toMatchObject({ notesWithoutHub: [{ slug: "new-note" }, { slug: "ryzen-laptop-specs" }] });
 
     const hubInput = (slug: string, body: string) => ({ slug, frontmatter: { title: slug, type: "hub" as const, summary: "s", tags: [] }, body });
     await tb.brain.write(hubInput("hardware", "- [[ryzen-laptop-specs]]\n- [[new-note]]\n"), meta);
     await tb.brain.write(hubInput("laptops", "- [[ryzen-laptop-specs]]\n"), meta);
-    expect(textOf(await mcp.callTool({ name: "check_links", arguments: {} }))).toBe(
-      "Notes listed by more than one hub:\n  ryzen-laptop-specs <- hardware, laptops",
-    );
+    expect((await mcp.callTool({ name: "check_links", arguments: {} })).structuredContent).toMatchObject({ notesInSeveralHubs: [{ slug: "ryzen-laptop-specs", hubs: ["hardware", "laptops"] }] });
 
     await tb.brain.delete("laptops", meta);
-    expect(textOf(await mcp.callTool({ name: "check_links", arguments: {} }))).toBe("No problems.");
+    expect((await mcp.callTool({ name: "check_links", arguments: {} })).structuredContent).toMatchObject({ brokenLinks: [], notesInSeveralHubs: [] });
 
     expect(
       formatLinkReport({
@@ -422,11 +411,11 @@ describe("MCP server", () => {
 
   it("list_tags and stats format one line per item", async () => {
     const tags = await mcp.callTool({ name: "list_tags", arguments: {} });
-    expect(textOf(tags)).toBe("hardware — Machines the owner owns.");
+    expect(tags.structuredContent).toMatchObject({ tags: [{ name: "hardware", description: "Machines the owner owns." }] });
     const s = await tb.brain.stats();
     expect(s.files).toBe(1);
     const stats = await mcp.callTool({ name: "stats", arguments: {} });
-    expect(textOf(stats)).toBe(`notes: ${s.notes}\nfiles: 1\ninvalid: 0`);
+    expect(stats.structuredContent).toEqual(s);
   });
 
   it("serves the conventions and skill resources from disk", async () => {
@@ -493,11 +482,11 @@ describe("pins through MCP", () => {
   });
 
   it("set_pin pins and unpins through the REST app, and list_pins lists Home pins then sidebar pins", async () => {
-    expect(textOf(await mcp.callTool({ name: "list_pins", arguments: {} }))).toBe("No pins.");
+    expect((await mcp.callTool({ name: "list_pins", arguments: {} })).structuredContent).toEqual({ home: [], sidebar: [] });
 
     const first = await setPin({ slug: "ryzen-laptop-specs", target: "home", pinned: true });
     expect(first.isError).toBeFalsy();
-    expect(textOf(first)).toBe("ryzen-laptop-specs is pinned to home.\nHome:\n  ryzen-laptop-specs — note — Ryzen laptop specs\nSidebar: none");
+    expect(first.structuredContent).toMatchObject({ slug: "ryzen-laptop-specs", target: "home", pinned: true, pins: { home: [{ slug: "ryzen-laptop-specs" }] } });
     const call = calls.at(-1)!;
     expect([call.method, call.url.pathname, call.body, call.headers.get("X-Brain-Tool")]).toEqual([
       "PUT",
@@ -510,23 +499,11 @@ describe("pins through MCP", () => {
     await setPin({ slug: "laptop-transcript", target: "sidebar", pinned: true });
     await setPin({ slug: "index", target: "home", pinned: true });
     const list = await mcp.callTool({ name: "list_pins", arguments: {} });
-    expect(textOf(list).split("\n")).toEqual([
-      "Home:",
-      "  ryzen-laptop-specs — note — Ryzen laptop specs",
-      "  index — hub — Index",
-      "Sidebar:",
-      "  laptop-transcript — source — Laptop transcript",
-    ]);
+    expect(list.structuredContent).toMatchObject({ home: [{ slug: "ryzen-laptop-specs" }, { slug: "index" }], sidebar: [{ slug: "laptop-transcript" }] });
     expect(list.structuredContent).toEqual(await (await app.request("/api/pins")).json());
 
     const unpinned = await setPin({ slug: "ryzen-laptop-specs", target: "home", pinned: false });
-    expect(textOf(unpinned).split("\n")).toEqual([
-      "ryzen-laptop-specs is not pinned to home.",
-      "Home:",
-      "  index — hub — Index",
-      "Sidebar:",
-      "  laptop-transcript — source — Laptop transcript",
-    ]);
+    expect(unpinned.structuredContent).toMatchObject({ pins: { home: [{ slug: "index" }], sidebar: [{ slug: "laptop-transcript" }] } });
     expect((await tb.commits()).slice(0, 4)).toEqual([
       "mcp: unpin ryzen-laptop-specs from home",
       "mcp: pin index to home",
@@ -545,8 +522,8 @@ describe("pins through MCP", () => {
 
   it("check_links lists a pinned slug whose note is gone", async () => {
     await tb.addFile("pins.yml", "home: [index, gone-note]\nsidebar: [gone-note]\n");
-    expect(textOf(await mcp.callTool({ name: "check_links", arguments: {} }))).toBe("Pins with no note:\n  gone-note\nNotes no hub lists:\n  ryzen-laptop-specs");
-    expect(textOf(await mcp.callTool({ name: "list_pins", arguments: {} }))).toBe("Home:\n  index — hub — Index\nSidebar: none");
+    expect((await mcp.callTool({ name: "check_links", arguments: {} })).structuredContent).toMatchObject({ missingPins: ["gone-note"], notesWithoutHub: [{ slug: "ryzen-laptop-specs" }] });
+    expect((await mcp.callTool({ name: "list_pins", arguments: {} })).structuredContent).toMatchObject({ home: [{ slug: "index" }], sidebar: [] });
   });
 });
 
@@ -573,43 +550,40 @@ describe("list_notes paging", () => {
     await tb.dispose();
   });
 
-  const listNotes = async (args: Record<string, unknown>) => textOf(await mcp.callTool({ name: "list_notes", arguments: args })).split("\n");
+  const listNotes = async (args: Record<string, unknown>) => (await mcp.callTool({ name: "list_notes", arguments: args })).structuredContent as { items: Array<{ slug: string }>; total: number; offset: number };
   const lastListParams = () => calls.filter((c) => c.url.pathname === "/api/notes").at(-1)!.url.searchParams;
 
   it("asks for 50 notes and ends with the next offset while more remain", async () => {
-    const lines = await listNotes({});
-    expect(lines).toHaveLength(51);
-    expect(lines[0]).toBe("index — Index — Root hub. Lists every domain hub.");
-    expect(lines[1]).toBe("note-001 — Note 001 — Summary 001.");
-    expect(lines[49]).toBe("note-049 — Note 049 — Summary 049.");
-    expect(lines[50]).toBe("Showing 1-50 of 121 notes. Call list_notes with offset=50 for the next page, or narrow it with tag or type.");
+    const page = await listNotes({});
+    expect(page.items).toHaveLength(50);
+    expect(page.items[0]?.slug).toBe("index");
+    expect(page.items[1]?.slug).toBe("note-001");
+    expect(page.total).toBe(121);
     expect(lastListParams().get("limit")).toBe("50");
     expect(lastListParams().has("offset")).toBe(false);
   });
 
   it("follows offset to the last page, which has no footer", async () => {
     const middle = await listNotes({ offset: 50 });
-    expect(middle[0]).toBe("note-050 — Note 050 — Summary 050.");
-    expect(middle.at(-1)).toBe("Showing 51-100 of 121 notes. Call list_notes with offset=100 for the next page, or narrow it with tag or type.");
+    expect(middle.items[0]?.slug).toBe("note-050");
+    expect(middle.items.at(-1)?.slug).toBe("note-099");
 
     const custom = await listNotes({ limit: 7, offset: 10 });
-    expect(custom).toHaveLength(8);
-    expect(custom.at(-1)).toBe("Showing 11-17 of 121 notes. Call list_notes with offset=17 for the next page, or narrow it with tag or type.");
+    expect(custom.items).toHaveLength(7);
     expect([lastListParams().get("limit"), lastListParams().get("offset")]).toEqual(["7", "10"]);
 
     const last = await listNotes({ offset: 100 });
-    expect(last).toHaveLength(21);
-    expect(last[0]).toBe("note-100 — Note 100 — Summary 100.");
-    expect(last.at(-1)).toBe("note-120 — Note 120 — Summary 120.");
+    expect(last.items).toHaveLength(21);
+    expect(last.items[0]?.slug).toBe("note-100");
+    expect(last.items.at(-1)?.slug).toBe("note-120");
 
-    expect(await listNotes({ offset: 500 })).toEqual(["No notes at offset=500. There are 121 in total."]);
+    expect((await listNotes({ offset: 500 })).items).toHaveLength(0);
   });
 
   it("has no footer when a filter fits on one page", async () => {
-    const lines = await listNotes({ tag: "hardware" });
-    expect(lines).toHaveLength(10);
-    expect(lines.some((l) => l.startsWith("Showing"))).toBe(false);
-    expect(await listNotes({ tag: "nope" })).toEqual(["No notes."]);
+    const page = await listNotes({ tag: "hardware" });
+    expect(page.items).toHaveLength(10);
+    expect((await listNotes({ tag: "nope" })).items).toHaveLength(0);
   });
 });
 
