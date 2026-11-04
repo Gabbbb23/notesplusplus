@@ -151,14 +151,14 @@ describe("Home", () => {
     expect(college.querySelector("[data-slot='note-chip']")).not.toBeNull();
   });
 
-  it("puts the domains and pins first, then Recent, Bookmarks, and Stats", async () => {
+  it("puts the pins and domains first, then Recent, Bookmarks, and Stats", async () => {
     const pin = { ...summary("rizal-day", "Rizal Day"), tags: ["college"] };
     await renderAt("/", {
       "/api/pins": () => reply(200, { home: [pin], sidebar: [] }),
       "/api/notes?sort=created&limit=50": () => reply(200, page([pin])),
       "/api/bookmarks": () => reply(200, { groups: [{ name: "thesis", slugs: ["rizal-day"] }] }),
     });
-    const order = ["Domains", "Pinned", "Recent", "Bookmarks", "Stats"].map(region);
+    const order = ["Pinned", "Domains", "Recent", "Bookmarks", "Stats"].map(region);
     for (let i = 1; i < order.length; i++) {
       expect(order[i - 1]!.compareDocumentPosition(order[i]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     }
@@ -276,7 +276,7 @@ describe("Home's stats", () => {
 describe("the navigation drawer's Domains", () => {
   const domainsNav = (root: HTMLElement) => within(root).queryByRole("navigation", { name: "Domains" });
 
-  it("lists the domains between the destinations and the pins, each with its letter, linking to its hub", async () => {
+  it("lists the domains under the destinations and the pins, each with its letter, linking to its hub", async () => {
     await renderAt("/tags", { "/api/pins": () => reply(200, { home: [], sidebar: [summary("rizal-day", "Rizal Day")] }) });
     const nav = domainsNav(drawer())!;
     const rows = within(nav).getAllByRole("link");
@@ -287,8 +287,8 @@ describe("the navigation drawer's Domains", () => {
 
     const main = within(drawer()).getByRole("navigation", { name: "Main" });
     const pins = within(drawer()).getByRole("navigation", { name: "Pinned" });
-    expect(main.compareDocumentPosition(nav) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(nav.compareDocumentPosition(pins) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(main.compareDocumentPosition(pins) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(pins.compareDocumentPosition(nav) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // The rail keeps the destinations alone.
     expect(domainsNav(rail())).toBeNull();
   });

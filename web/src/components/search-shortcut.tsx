@@ -12,7 +12,7 @@ import { useLocation, useNavigate } from "react-router";
 import { FOCUS_SEARCH, matchesShortcut } from "@/lib/shortcuts";
 
 /*
- * The Alt+K shortcut that focuses the search field. Search fields register here through
+ * The / shortcut that focuses the search field. Search fields register here through
  * SearchInput's shortcutTarget prop; nothing else looks fields up in the page. Layout mounts the
  * provider once, and with it the one global keydown listener.
  */
@@ -94,8 +94,8 @@ export function createSearchShortcutRegistry(): SearchShortcutRegistry {
 const SearchShortcutContext = createContext<SearchShortcutRegistry | null>(null);
 
 /**
- * Holds the search fields and listens for Alt+K anywhere on the page, including inside another
- * input. Alt+K focuses the Search page box on /search, the top bar field elsewhere, and selects its
+ * Holds the search fields and listens for / anywhere on the page except inside a field, where it
+ * types itself. / focuses the Search page box on /search, the top bar field elsewhere, and selects its
  * text. When no field is shown, it opens /search and focuses the box there.
  */
 export function SearchShortcutProvider({ children }: { children: ReactNode }) {

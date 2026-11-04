@@ -45,7 +45,7 @@ function press(init: KeyboardEventInit) {
   return notPrevented;
 }
 
-const ALT_K = { code: "KeyK", key: "k", altKey: true };
+const SLASH = { code: "Slash", key: "/" };
 
 const topBar = () => screen.getByRole("searchbox", { name: "Search" });
 const selection = (input: HTMLElement) => [(input as HTMLInputElement).selectionStart, (input as HTMLInputElement).selectionEnd];
@@ -54,7 +54,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("Alt+K in the app", () => {
+describe("/ in the app", () => {
   it("focuses the top bar field on a normal page and selects its text", async () => {
     renderAt("/tags");
     await screen.findByRole("heading", { level: 1, name: "Tags" });
@@ -62,49 +62,49 @@ describe("Alt+K in the app", () => {
     fireEvent.change(field, { target: { value: "ryzen" } });
     expect(field).not.toHaveFocus();
 
-    expect(press(ALT_K)).toBe(false);
+    expect(press(SLASH)).toBe(false);
 
     expect(field).toHaveFocus();
     expect(selection(field)).toEqual([0, 5]);
-    expect(field).toHaveAttribute("aria-keyshortcuts", "Alt+K");
+    expect(field).toHaveAttribute("aria-keyshortcuts", "/");
   });
 
   it("focuses the Search page box on /search, not the top bar, and selects its text", async () => {
     renderAt("/search?q=ryzen");
     const box = await screen.findByRole("searchbox", { name: "Query" });
     expect(box).toHaveValue("ryzen");
-    act(() => topBar().focus());
+    // The box focuses itself on arrival, where / types; move focus off any field first.
+    act(() => (document.activeElement as HTMLElement | null)?.blur());
 
-    expect(press(ALT_K)).toBe(false);
+    expect(press(SLASH)).toBe(false);
 
     expect(box).toHaveFocus();
     expect(selection(box)).toEqual([0, 5]);
-    expect(box).toHaveAttribute("aria-keyshortcuts", "Alt+K");
+    expect(box).toHaveAttribute("aria-keyshortcuts", "/");
     expect(topBar()).not.toHaveAttribute("aria-keyshortcuts");
   });
 
-  it("works while typing in a textarea, and matches Option+K on macOS by its physical key", async () => {
+  it("types itself in a textarea instead of moving focus", async () => {
     renderAt("/inbox");
     const content = await screen.findByRole("textbox", { name: "Content" });
     act(() => content.focus());
 
-    expect(press({ code: "KeyK", key: "˚", altKey: true })).toBe(false);
-    expect(topBar()).toHaveFocus();
+    expect(press(SLASH)).toBe(true);
+    expect(content).toHaveFocus();
   });
 
-  it("leaves Ctrl+Alt+K (AltGr), Alt+Shift+K, repeats, and plain K alone", async () => {
-    renderAt("/inbox");
-    const content = await screen.findByRole("textbox", { name: "Content" });
-    act(() => content.focus());
+  it("leaves Ctrl+/, Alt+/, Meta+/, and repeats alone", async () => {
+    renderAt("/tags");
+    await screen.findByRole("heading", { level: 1, name: "Tags" });
 
     for (const init of [
-      { ...ALT_K, ctrlKey: true },
-      { ...ALT_K, shiftKey: true },
-      { ...ALT_K, repeat: true },
-      { code: "KeyK", key: "k" },
+      { ...SLASH, ctrlKey: true },
+      { ...SLASH, altKey: true },
+      { ...SLASH, metaKey: true },
+      { ...SLASH, repeat: true },
     ]) {
       expect(press(init), JSON.stringify(init)).toBe(true);
-      expect(content).toHaveFocus();
+      expect(topBar()).not.toHaveFocus();
     }
   });
 
@@ -113,7 +113,7 @@ describe("Alt+K in the app", () => {
     await screen.findByRole("heading", { level: 1, name: "Tags" });
     topBar().closest("form")!.style.display = "none";
 
-    expect(press(ALT_K)).toBe(false);
+    expect(press(SLASH)).toBe(false);
 
     const box = await screen.findByRole("searchbox", { name: "Query" });
     expect(screen.getByRole("heading", { level: 1, name: "Search" })).toBeInTheDocument();
@@ -189,14 +189,14 @@ describe("the shortcut hint in <SearchInput>", () => {
   it("shows the keycaps, hidden from assistive tech, while the field is empty and unfocused", () => {
     renderFields(<Field target="top-bar" />);
     const field = screen.getByRole("searchbox", { name: "Search" });
-    expect(field).toHaveAttribute("aria-keyshortcuts", "Alt+K");
+    expect(field).toHaveAttribute("aria-keyshortcuts", "/");
 
     const shown = hint()!;
     expect(shown).toHaveAttribute("aria-hidden", "true");
     expect(Array.from(shown.querySelectorAll("kbd"), (k) => k.textContent)).toEqual([...FOCUS_SEARCH.keys]);
     // Only from the medium window class up, on devices with hover and a fine pointer, with room kept so text never runs under it.
     expect(shown).toHaveClass("hidden", "medium:[@media(hover:hover)_and_(pointer:fine)]:flex", "pointer-events-none");
-    expect(field).toHaveClass("medium:[@media(hover:hover)_and_(pointer:fine)]:pr-20");
+    expect(field).toHaveClass("medium:[@media(hover:hover)_and_(pointer:fine)]:pr-12");
     expect(field.className).not.toMatch(/(?:^|\s)\[@media/);
   });
 
@@ -240,7 +240,7 @@ describe("the shortcut hint in <SearchInput>", () => {
     expect(hint(screen.getByTestId("top"))).toBeNull();
     expect(hint(screen.getByTestId("page"))).not.toBeNull();
     expect(screen.getByRole("searchbox", { name: "Search" })).not.toHaveAttribute("aria-keyshortcuts");
-    expect(screen.getByRole("searchbox", { name: "Query" })).toHaveAttribute("aria-keyshortcuts", "Alt+K");
+    expect(screen.getByRole("searchbox", { name: "Query" })).toHaveAttribute("aria-keyshortcuts", "/");
     expect(container.querySelectorAll("[data-slot='shortcut-hint']")).toHaveLength(1);
   });
 

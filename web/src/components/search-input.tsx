@@ -41,7 +41,7 @@ const SHAPE_CLASS: Record<SearchInputShape, { field: string; icon: string; input
  */
 const HINT_CLASS =
   "pointer-events-none absolute top-1/2 right-4 hidden -translate-y-1/2 medium:[@media(hover:hover)_and_(pointer:fine)]:flex";
-const HINT_ROOM_CLASS = "medium:[@media(hover:hover)_and_(pointer:fine)]:pr-20";
+const HINT_ROOM_CLASS = "medium:[@media(hover:hover)_and_(pointer:fine)]:pr-12";
 
 export interface SearchInputProps {
   value: string;
@@ -54,7 +54,7 @@ export interface SearchInputProps {
   /** Default "box". */
   shape?: SearchInputShape;
   /**
-   * Makes this field a target of the Alt+K shortcut (search-shortcut.tsx): "page" for the Search
+   * Makes this field a target of the / shortcut (search-shortcut.tsx): "page" for the Search
    * page box, which wins, or "top-bar". While the shortcut goes here the field gets
    * aria-keyshortcuts and, when empty and unfocused, the keycap hint.
    */

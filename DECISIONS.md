@@ -234,3 +234,13 @@ Supersedes: 2026-09-14 — Web UI moves to React, Vite, Tailwind, and shadcn (th
 Decision: Home is titled "Home" and opens with the domains the root hub lists, as M3 filled cards: the hub, its sub-hubs as chips, its last update, and a link to all of the domain's notes on its tag page. Pinned notes follow as list rows. On windows from 1200px a supporting pane on the right holds the Recent section (still by created day), the bookmark groups with their counts, and the stats; narrower windows stack them under the main column. Home no longer renders the root hub's markdown; "Open index" reaches it. The navigation drawer gets a Domains section between the destinations and the pins. Bookmarks moves group creation into a dialog, gives each group an anchor Home links to, and shows notes as list rows, with the four views each showing different detail. Every card and list row that opens something is one target as a whole, not only its title text: a linked `ItemCard` stretches its title link over the card, and `LinkRow` does the same for a list item. The Tags page becomes a list of such rows.
 Because: The owner asked to organize Home and Bookmarks better under Material 3 and to make notes easier to navigate. The root hub is only the list of domains, and it sat at the bottom of Home under the pins, stats, and Recent, so the map of the brain was the last thing on the page. The owner also asked that cards open when clicked anywhere, after having to aim for the title text.
 Supersedes: 2026-09-17 — Home opens with a Recent section, ordered by created date (the place of Recent and the root hub on Home; ordering by created date stands).
+
+## 2026-11-04 — Pins come before the domains
+Decision: On Home the pinned notes sit above the domain cards, and in the navigation drawer the Pinned section sits above Domains.
+Because: The owner asked for Pinned above Domains.
+Supersedes: 2026-11-03 — Home leads with the domains; the drawer lists them too (only the order of pins and domains; the rest stands).
+
+## 2026-11-04 — / focuses search
+Decision: / moves focus to the search field and selects its text, on the Search page its box and elsewhere the top bar's. Unlike Alt+K it does nothing while typing in a field, so "/" still types there. The field's hint shows one key, "/".
+Because: The owner asked for / in place of Alt+K.
+Supersedes: 2026-09-15 — Alt+K focuses search

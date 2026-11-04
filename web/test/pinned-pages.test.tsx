@@ -80,7 +80,7 @@ afterEach(() => {
 });
 
 describe("Home: Pinned", () => {
-  it("lists the Home pins under the domains as rows in pin order, each with its type, its domain, and its menu", async () => {
+  it("lists the Home pins above the domains as rows in pin order, each with its type, its domain, and its menu", async () => {
     renderAt("/", { "/api/pins": () => reply(200, pinned([BUDGET, RIZAL, LONG])) });
 
     const heading = await screen.findByRole("heading", { level: 2, name: "Pinned" });
@@ -97,11 +97,11 @@ describe("Home: Pinned", () => {
       expect(within(card).getByRole("button", { name: /^More actions for / })).toBeInTheDocument();
     }
 
-    // Under the domains, above the stats.
+    // Above the domains and the stats.
     const section = heading.closest("section")!;
     const domains = screen.getByRole("region", { name: "Domains" });
     const stats = await screen.findByRole("region", { name: "Stats" });
-    expect(domains.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(section.compareDocumentPosition(domains) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(section.compareDocumentPosition(stats) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 

@@ -164,8 +164,8 @@ export function HomePage() {
       <PageHeader title="Home" tabTitle="" />
       <div className="grid gap-8 large:grid-cols-[minmax(0,1fr)_22rem] large:items-start">
         <div className="@container min-w-0 space-y-8">
-          <DomainsSection domains={domains} onRetry={retry} />
           <PinnedNotes domainTags={domainTags} />
+          <DomainsSection domains={domains} onRetry={retry} />
         </div>
         <div className="min-w-0 space-y-8">
           <RecentNotes />

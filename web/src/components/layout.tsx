@@ -307,7 +307,7 @@ export function Layout() {
   const scrolled = usePageScrolled();
 
   return (
-    // Mounts the one Alt+K listener and the registry that the search fields join, the one copy of the pins
+    // Mounts the one / listener and the registry that the search fields join, the one copy of the pins
     // and of the domains, and the history position and scroll memory behind Back and Forward.
     <SearchShortcutProvider>
       <PinsProvider>
@@ -337,8 +337,8 @@ export function Layout() {
                   </div>
                   <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-3 pb-3">
                     <NavLinks layout="drawer" />
-                    <DomainLinks />
                     <PinnedLinks />
+                    <DomainLinks />
                   </div>
                   <div className="px-7 py-4 text-body-small text-on-surface-variant">The agent writes the notes.</div>
                 </aside>
@@ -387,8 +387,8 @@ export function Layout() {
                 </div>
                 <div className="-mx-3 min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-3 pb-3">
                   <NavLinks layout="drawer" onNavigate={close} />
-                  <DomainLinks onNavigate={close} />
                   <PinnedLinks onNavigate={close} />
+                  <DomainLinks onNavigate={close} />
                 </div>
               </SheetContent>
             </Sheet>

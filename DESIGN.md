@@ -47,7 +47,7 @@ A 4px rhythm. Layout follows the M3 window size classes, available as Tailwind v
 
 The content column is capped at 52rem, and at 80rem on a note page with its outline and on Home.
 
-Home follows the M3 supporting-pane layout. The main column holds the domains (filled cards, one per hub the root hub lists) and then the pinned notes. From 1200px a pane on the right holds Recent, the bookmark groups, and the stats; narrower windows stack them below. The navigation drawer lists the same domains between its destinations and the pins. Primary content never scrolls sideways. Touch targets are at least 48 by 48px.
+Home follows the M3 supporting-pane layout. The main column holds the pinned notes and then the domains (filled cards, one per hub the root hub lists). From 1200px a pane on the right holds Recent, the bookmark groups, and the stats; narrower windows stack them below. The navigation drawer lists the same domains under its destinations and its pins. Primary content never scrolls sideways. Touch targets are at least 48 by 48px.
 
 ## 5. Components
 

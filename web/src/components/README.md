@@ -265,15 +265,15 @@ The main column stays 52rem wide, 80rem on a note page and on Home (the `.note-p
 
 `SearchInput` for the search field with its leading search icon. `shape="pill"` is the M3 search bar, for the top app bar: 48px, fully rounded, on surface-container-high with no outline, and a hover state layer. `shape="box"`, the default, is the M3 outlined text field from `ui/input`, 56px, with the icon 12px in; the Search page and the Tag page filter use it. It takes `value`, `onChange`, `label`, `placeholder`, `name`, `autoFocus`, and `shortcutTarget`. The form and any button stay with the caller.
 
-`shortcutTarget` (`"top-bar"` or `"page"`) makes the field a target of the Alt+K shortcut (see `search-shortcut.tsx`). While the shortcut goes to that field, it gets `aria-keyshortcuts="Alt+K"` and, while empty and unfocused, the keycap hint on its right. The hint is `aria-hidden`, so the label is read once and the keys are not read twice. It shows only from the medium window class (600px) up and on devices with hover and a fine pointer, and the field keeps 80px of right padding there so text never runs under it. Narrower windows and phones get neither, so the placeholder stays whole.
+`shortcutTarget` (`"top-bar"` or `"page"`) makes the field a target of the / shortcut (see `search-shortcut.tsx`). While the shortcut goes to that field, it gets `aria-keyshortcuts="/"` and, while empty and unfocused, the keycap hint on its right. The hint is `aria-hidden`, so the label is read once and the keys are not read twice. It shows only from the medium window class (600px) up and on devices with hover and a fine pointer, and the field keeps 48px of right padding there so text never runs under it. Narrower windows and phones get neither, so the placeholder stays whole.
 
 ## search-shortcut.tsx
 
-The Alt+K shortcut that focuses the search field. `lib/shortcuts.ts` holds its facts: the physical key `KeyK`, Alt with no Ctrl, Shift, or Meta, the `aria-keyshortcuts` value "Alt+K", and the keys the hint draws ("Alt K", or "⌥ K" on macOS, with the platform read once). The listener, the input's aria attribute, and the hint all read them from there.
+The / shortcut that focuses the search field. `lib/shortcuts.ts` holds its facts: the character "/" with no Ctrl, Alt, or Meta, the `aria-keyshortcuts` value "/", and the one key the hint draws. The listener, the input's aria attribute, and the hint all read them from there.
 
 - `SearchShortcutProvider` is mounted once, in `layout.tsx`. It holds the one `keydown` listener on `window`.
 - `SearchInput` joins its registry through `shortcutTarget`. No page looks fields up with selectors.
-- The shortcut matches on `event.code`, so Option+K on macOS (which types "˚") still counts. It ignores key repeats, and Ctrl+Alt (AltGr on Windows layouts) never triggers it. It works from anywhere, including inside another input or textarea.
+- The shortcut matches on `event.key`, so a layout that types "/" with Shift still counts. It ignores key repeats. Inside an input, textarea, select, or editable content it does nothing, so "/" types there as usual.
 - It prevents the default action, then focuses the Search page box when there is one, otherwise the top bar field, and selects the field's text. When no field is shown, it opens `/search` and focuses the box there.
 
 ## history-nav.tsx
